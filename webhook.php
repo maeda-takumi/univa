@@ -188,12 +188,14 @@ try {
         $payload['transaction_id'] ?? null,
         $payload['id'] ?? null,
         get_nested($payload, ['data', 'transaction_id']),
+        get_nested($payload, ['data', 'transaction_token_id']),
         get_nested($payload, ['transaction', 'id'])
     ]);
 
     $chargeId = first_non_empty([
         $payload['charge_id'] ?? null,
         get_nested($payload, ['data', 'charge_id']),
+        get_nested($payload, ['data', 'id']),
         get_nested($payload, ['charge', 'id'])
     ]);
 
@@ -206,12 +208,17 @@ try {
     $customerId = first_non_empty([
         $payload['customer_id'] ?? null,
         get_nested($payload, ['data', 'customer_id']),
-        get_nested($payload, ['customer', 'id'])
+        get_nested($payload, ['customer', 'id']),
+        get_nested($payload, ['data', 'email']),
+        get_nested($payload, ['data', 'metadata', 'univapay-name']),
+        get_nested($payload, ['data', 'metadata', 'univapay-phone-number'])
     ]);
 
     $amount = first_non_empty_int([
         $payload['amount'] ?? null,
         get_nested($payload, ['data', 'amount']),
+        get_nested($payload, ['data', 'charged_amount']),
+        get_nested($payload, ['data', 'requested_amount']),
         get_nested($payload, ['transaction', 'amount']),
         get_nested($payload, ['charge', 'amount'])
     ]);
@@ -219,6 +226,8 @@ try {
     $currency = first_non_empty([
         $payload['currency'] ?? null,
         get_nested($payload, ['data', 'currency']),
+        get_nested($payload, ['data', 'charged_currency']),
+        get_nested($payload, ['data', 'requested_currency']),
         get_nested($payload, ['transaction', 'currency']),
         get_nested($payload, ['charge', 'currency'])
     ]);
