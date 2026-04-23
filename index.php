@@ -117,18 +117,28 @@ function extract_display_data(array $row): array
         'payment_amount' => $paymentAmount ?? '',
         'payer_name' => $payerName ?? '',
         'email' => $email ?? '',
+        'status' => trim((string)($row['status'] ?? '')),
     ];
 }
-function build_page_url(int $page, string $keyword): string
+function build_page_url(int $page, array $filters): string
 {
     $params = ['page' => $page];
-    if ($keyword !== '') {
-        $params['q'] = $keyword;
+    foreach ($filters as $key => $value) {
+        if ($value === '') {
+            continue;
+        }
+        $params[$key] = $value;
     }
     return '?' . http_build_query($params);
 }
 
-$keyword = trim((string)($_GET['q'] ?? ''));
+$filters = [
+    'payment_date_from' => trim((string)($_GET['payment_date_from'] ?? '')),
+    'payment_date_to' => trim((string)($_GET['payment_date_to'] ?? '')),
+    'payer_name' => trim((string)($_GET['payer_name'] ?? '')),
+    'email' => trim((string)($_GET['email'] ?? '')),
+    'status' => trim((string)($_GET['status'] ?? '')),
+];
 $page = max(1, (int)($_GET['page'] ?? 1));
 
 $dbExists = file_exists(DB_FILE);
@@ -139,6 +149,7 @@ $errorMessage = '';
 $infoMessage = '';
 $summaryCount = 0;
 $summaryAmount = 0;
+$statusOptions = [];
 
 if ($dbExists) {
     try {
@@ -146,17 +157,32 @@ if ($dbExists) {
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
-        $whereConditions = [
-            "lower(ifnull(status, '')) IN ('successful', 'succeeded', 'success', 'paid', 'completed', '成功')",
-        ];
+        $statusStmt = $pdo->query("SELECT DISTINCT TRIM(status) AS status_value FROM webhook_events WHERE TRIM(IFNULL(status, '')) <> '' ORDER BY status_value ASC");
+        $statusOptions = array_values(array_filter(array_map(static fn(array $row): string => (string)($row['status_value'] ?? ''), $statusStmt->fetchAll()), static fn(string $value): bool => $value !== ''));
+
+        $whereConditions = ["TRIM(IFNULL(status, '')) <> ''"];
         $params = [];
 
-        if ($keyword !== '') {
-            $whereConditions[] = "(
-                received_at LIKE :kw OR
-                raw_json LIKE :kw
-            )";
-            $params[':kw'] = '%' . $keyword . '%';
+        $paymentDateExpression = "date(COALESCE(NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), ''), received_at))";
+        if ($filters['payment_date_from'] !== '') {
+            $whereConditions[] = "{$paymentDateExpression} >= :payment_date_from";
+            $params[':payment_date_from'] = $filters['payment_date_from'];
+        }
+        if ($filters['payment_date_to'] !== '') {
+            $whereConditions[] = "{$paymentDateExpression} <= :payment_date_to";
+            $params[':payment_date_to'] = $filters['payment_date_to'];
+        }
+        if ($filters['payer_name'] !== '') {
+            $whereConditions[] = "raw_json LIKE :payer_name";
+            $params[':payer_name'] = '%' . $filters['payer_name'] . '%';
+        }
+        if ($filters['email'] !== '') {
+            $whereConditions[] = "raw_json LIKE :email";
+            $params[':email'] = '%' . $filters['email'] . '%';
+        }
+        if ($filters['status'] !== '') {
+            $whereConditions[] = "status = :status";
+            $params[':status'] = $filters['status'];
         }
         $whereSql = 'WHERE ' . implode(' AND ', $whereConditions);
 
@@ -181,7 +207,8 @@ if ($dbExists) {
         $sql = "SELECT
                     id,
                     received_at,
-                    raw_json
+                    raw_json,
+                    status
                 FROM webhook_events
                 {$whereSql}
                 ORDER BY datetime(received_at) DESC, id DESC
@@ -197,7 +224,7 @@ if ($dbExists) {
         $rows = $stmt->fetchAll();
 
         if ($totalCount === 0) {
-            $infoMessage = $keyword !== '' ? '検索条件に一致するデータがありません。' : 'まだデータがありません。';
+            $infoMessage = '検索条件に一致するデータがありません。';
         }
     } catch (Throwable $e) {
         $errorMessage = 'DBの読み込みに失敗しました。';
@@ -211,15 +238,32 @@ require __DIR__ . '/header.php';
 
 <section class="panel search-panel">
     <form method="get" class="search-form">
-        <div class="search-group">
-            <label for="q">検索</label>
-            <input
-                type="text"
-                id="q"
-                name="q"
-                value="<?= h($keyword) ?>"
-                placeholder="イベント種別、取引ID、ステータスなどで検索"
-            >
+        <div class="search-grid">
+            <div class="search-group">
+                <label for="payment_date_from">入金日（開始日）</label>
+                <input type="date" id="payment_date_from" name="payment_date_from" value="<?= h($filters['payment_date_from']) ?>">
+            </div>
+            <div class="search-group">
+                <label for="payment_date_to">入金日（終了日）</label>
+                <input type="date" id="payment_date_to" name="payment_date_to" value="<?= h($filters['payment_date_to']) ?>">
+            </div>
+            <div class="search-group">
+                <label for="payer_name">入金者名（部分一致）</label>
+                <input type="text" id="payer_name" name="payer_name" value="<?= h($filters['payer_name']) ?>" placeholder="例: 山田">
+            </div>
+            <div class="search-group">
+                <label for="email">メールアドレス</label>
+                <input type="text" id="email" name="email" value="<?= h($filters['email']) ?>" placeholder="例: sample@example.com">
+            </div>
+            <div class="search-group">
+                <label for="status">ステータス</label>
+                <select id="status" name="status">
+                    <option value="">すべて</option>
+                    <?php foreach ($statusOptions as $statusOption): ?>
+                        <option value="<?= h($statusOption) ?>" <?= $statusOption === $filters['status'] ? 'selected' : '' ?>><?= h($statusOption) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
         </div>
         <div class="search-actions">
             <button type="submit" class="btn btn-primary">検索</button>
@@ -230,7 +274,7 @@ require __DIR__ . '/header.php';
 
 <?php if ($errorMessage === ''): ?>
     <section class="panel summary-panel">
-        <h3>成功ステータス集計</h3>
+        <h3>ステータスありデータ集計</h3>
         <div class="summary-grid">
             <div class="summary-item">
                 <span class="summary-label">対象件数</span>
@@ -260,7 +304,7 @@ require __DIR__ . '/header.php';
     <div class="table-header">
         <div>
             <h3>一覧表示</h3>
-            <p>入金日 / 入金額 / 入金者名 / メールアドレス（最大25件ずつ）</p>
+            <p>入金日 / 入金額 / 入金者名 / メールアドレス / ステータス（最大25件ずつ）</p>
         </div>
         <div class="table-meta">
             <span>ページ <?= h((string)$page) ?> / <?= h((string)$totalPages) ?></span>
@@ -275,6 +319,7 @@ require __DIR__ . '/header.php';
                     <th>入金額</th>
                     <th>入金者名</th>
                     <th>メールアドレス</th>
+                    <th>ステータス</th>
                 </tr>
             </thead>
             <tbody>
@@ -286,11 +331,12 @@ require __DIR__ . '/header.php';
                             <td><?= h((string)$display['payment_amount']) ?></td>
                             <td><?= h((string)$display['payer_name']) ?></td>
                             <td><?= h((string)$display['email']) ?></td>
+                            <td><?= h((string)$display['status']) ?></td>
                         </tr>
                     <?php endforeach; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="4" class="empty-cell">表示するデータがありません。</td>
+                        <td colspan="5" class="empty-cell">表示するデータがありません。</td>
                     </tr>
                 <?php endif; ?>
             </tbody>
@@ -301,17 +347,17 @@ require __DIR__ . '/header.php';
         <?php $prevPage = max(1, $page - 1); ?>
         <?php $nextPage = min($totalPages, $page + 1); ?>
 
-        <a class="page-link <?= $page <= 1 ? 'disabled' : '' ?>" href="<?= $page <= 1 ? '#' : h(build_page_url($prevPage, $keyword)) ?>">前へ</a>
+        <a class="page-link <?= $page <= 1 ? 'disabled' : '' ?>" href="<?= $page <= 1 ? '#' : h(build_page_url($prevPage, $filters)) ?>">前へ</a>
 
         <?php
         $start = max(1, $page - 2);
         $end = min($totalPages, $page + 2);
         for ($i = $start; $i <= $end; $i++):
         ?>
-            <a class="page-link <?= $i === $page ? 'active' : '' ?>" href="<?= h(build_page_url($i, $keyword)) ?>"><?= $i ?></a>
+            <a class="page-link <?= $i === $page ? 'active' : '' ?>" href="<?= h(build_page_url($i, $filters)) ?>"><?= $i ?></a>
         <?php endfor; ?>
 
-        <a class="page-link <?= $page >= $totalPages ? 'disabled' : '' ?>" href="<?= $page >= $totalPages ? '#' : h(build_page_url($nextPage, $keyword)) ?>">次へ</a>
+        <a class="page-link <?= $page >= $totalPages ? 'disabled' : '' ?>" href="<?= $page >= $totalPages ? '#' : h(build_page_url($nextPage, $filters)) ?>">次へ</a>
     </nav>
 </section>
 
