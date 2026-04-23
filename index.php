@@ -103,24 +103,6 @@ if ($dbExists) {
 require __DIR__ . '/header.php';
 ?>
 
-<section class="panel hero-panel">
-    <div class="hero-copy">
-        <p class="hero-label">Overview</p>
-        <h2>入金・Webhookデータの確認ページ</h2>
-        <p class="hero-text">検索とページ送りに対応した、シンプルな一覧画面です。DBファイルが未作成でも画面は表示されます。</p>
-    </div>
-    <div class="hero-stats">
-        <div class="stat-card">
-            <span class="stat-label">データ件数</span>
-            <strong class="stat-value"><?= number_format($totalCount) ?></strong>
-        </div>
-        <div class="stat-card">
-            <span class="stat-label">1ページ表示件数</span>
-            <strong class="stat-value"><?= PER_PAGE ?></strong>
-        </div>
-    </div>
-</section>
-
 <section class="panel search-panel">
     <form method="get" class="search-form">
         <div class="search-group">
