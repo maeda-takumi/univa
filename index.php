@@ -318,8 +318,15 @@ require __DIR__ . '/header.php';
 <div class="content-layout">
 <aside class="panel sidebar-panel" id="sidebarPanel">
     <h2>メニュー</h2>
+    <div class="sidebar-brand">
+        <a class="sidebar-brand-link" href="index.php">
+            <img src="img/icon.png" alt="UNIVA-MIRROR アイコン" class="sidebar-brand-icon">
+            <span class="sidebar-brand-title">UNIVA-MIRROR</span>
+        </a>
+    </div>
     <nav aria-label="サイドバー">
-        <a class="sidebar-link" href="#" aria-disabled="true">準備中リンク</a>
+        <a class="sidebar-link" href="calc.php">日別・月別集計</a>
+        <a class="sidebar-link" href="calc.php">入金集計カード</a>
     </nav>
 </aside>
 <button type="button" class="sidebar-overlay" id="sidebarOverlay" aria-label="サイドバーを閉じる"></button>

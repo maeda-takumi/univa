@@ -574,3 +574,71 @@ a {
         grid-template-columns: 1fr;
     }
 }
+
+.sidebar-brand {
+    margin-bottom: 14px;
+}
+
+.sidebar-brand-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #f8fbff;
+}
+
+.sidebar-brand-icon {
+    width: 36px;
+    height: 36px;
+    object-fit: cover;
+    border-radius: 10px;
+}
+
+.sidebar-brand-title {
+    font-weight: 800;
+    letter-spacing: 0.02em;
+}
+
+.sidebar-panel nav {
+    display: grid;
+    gap: 10px;
+}
+
+.inline-filter {
+    grid-template-columns: minmax(220px, 320px);
+}
+
+.summary-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+}
+
+.summary-card-link {
+    display: grid;
+    gap: 8px;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--panel-soft);
+}
+
+.summary-card-link.active {
+    border-color: #60a5fa;
+    background: #eff6ff;
+}
+
+.summary-card-period {
+    font-weight: 700;
+}
+
+.summary-card-amount {
+    font-size: 22px;
+    font-weight: 800;
+}
+
+.summary-card-count {
+    color: var(--muted);
+}
