@@ -28,9 +28,21 @@ if (!function_exists('tme')) {
     <link rel="stylesheet" href="style/style.css?v=<?php echo h(tme('style/style.css')); ?>">
 </head>
 <body>
-<div class="app-shell">
+<div class="app-shell sidebar-open">
     <header class="site-header">
         <div class="container header-inner">
+            <button
+                type="button"
+                class="menu-toggle"
+                id="menuToggle"
+                aria-expanded="true"
+                aria-controls="sidebarPanel"
+                aria-label="サイドバーを開閉"
+            >
+                <span></span>
+                <span></span>
+                <span></span>
+            </button>
             <div>
                 <p class="eyebrow">Webhook Data Viewer</p>
                 <h1 class="site-title"><?= htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8') ?></h1>

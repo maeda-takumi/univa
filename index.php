@@ -278,12 +278,14 @@ require __DIR__ . '/header.php';
 ?>
 
 <div class="content-layout">
-<aside class="panel sidebar-panel">
+<aside class="panel sidebar-panel" id="sidebarPanel">
     <h2>メニュー</h2>
     <nav aria-label="サイドバー">
         <a class="sidebar-link" href="#" aria-disabled="true">準備中リンク</a>
     </nav>
 </aside>
+<button type="button" class="sidebar-overlay" id="sidebarOverlay" aria-label="サイドバーを閉じる"></button>
+
 
 <div class="content-main">
 <section class="panel search-panel">
