@@ -120,6 +120,47 @@ function extract_display_data(array $row): array
         'status' => trim((string)($row['status'] ?? '')),
     ];
 }
+function format_jpy_amount(mixed $amount): string
+{
+    if ($amount === null) {
+        return '';
+    }
+
+    $raw = trim((string)$amount);
+    if ($raw === '') {
+        return '';
+    }
+
+    $normalized = str_replace([',', '¥', '円', ' '], '', $raw);
+    if (!is_numeric($normalized)) {
+        return $raw;
+    }
+
+    return '¥' . number_format((int)round((float)$normalized));
+}
+
+function status_badge_class(string $status): string
+{
+    $normalized = strtolower(trim($status));
+
+    if ($normalized === '') {
+        return 'status-neutral';
+    }
+
+    if (str_contains($normalized, 'success') || str_contains($normalized, 'completed') || str_contains($normalized, 'paid')) {
+        return 'status-success';
+    }
+
+    if (str_contains($normalized, 'pending') || str_contains($normalized, 'processing')) {
+        return 'status-pending';
+    }
+
+    if (str_contains($normalized, 'fail') || str_contains($normalized, 'cancel') || str_contains($normalized, 'error') || str_contains($normalized, 'expired')) {
+        return 'status-danger';
+    }
+
+    return 'status-info';
+}
 function build_page_url(int $page, array $filters): string
 {
     $params = ['page' => $page];
@@ -236,6 +277,15 @@ if ($dbExists) {
 require __DIR__ . '/header.php';
 ?>
 
+<div class="content-layout">
+<aside class="panel sidebar-panel">
+    <h2>メニュー</h2>
+    <nav aria-label="サイドバー">
+        <a class="sidebar-link" href="#" aria-disabled="true">準備中リンク</a>
+    </nav>
+</aside>
+
+<div class="content-main">
 <section class="panel search-panel">
     <form method="get" class="search-form">
         <div class="search-grid">
@@ -282,7 +332,7 @@ require __DIR__ . '/header.php';
             </div>
             <div class="summary-item">
                 <span class="summary-label">合計金額</span>
-                <span class="summary-value"><?= h(number_format($summaryAmount)) ?></span>
+                <span class="summary-value"><?= h(format_jpy_amount($summaryAmount)) ?></span>
             </div>
         </div>
     </section>
@@ -328,10 +378,14 @@ require __DIR__ . '/header.php';
                         <?php $display = extract_display_data($row); ?>
                         <tr>
                             <td><?= h((string)$display['payment_date']) ?></td>
-                            <td><?= h((string)$display['payment_amount']) ?></td>
+                            <td><?= h(format_jpy_amount($display['payment_amount'])) ?></td>
                             <td><?= h((string)$display['payer_name']) ?></td>
                             <td><?= h((string)$display['email']) ?></td>
-                            <td><?= h((string)$display['status']) ?></td>
+                            <td>
+                                <span class="status-badge <?= h(status_badge_class((string)$display['status'])) ?>">
+                                    <?= h((string)$display['status']) ?>
+                                </span>
+                            </td>
                         </tr>
                     <?php endforeach; ?>
                 <?php else: ?>
@@ -361,4 +415,6 @@ require __DIR__ . '/header.php';
     </nav>
 </section>
 
+</div>
+</div>
 <?php require __DIR__ . '/footer.php'; ?>
