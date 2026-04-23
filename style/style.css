@@ -154,10 +154,40 @@ a {
 
 .search-panel,
 .table-panel,
-.message-panel {
+.message-panel,
+.summary-panel {
     padding: 24px;
 }
 
+.summary-panel h3 {
+    margin: 0 0 16px;
+    font-size: 18px;
+}
+
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.summary-item {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 16px;
+    background: var(--panel-soft);
+}
+
+.summary-label {
+    display: block;
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 8px;
+}
+
+.summary-value {
+    font-size: 24px;
+    font-weight: 700;
+}
 .search-form {
     display: flex;
     align-items: end;
@@ -398,7 +428,11 @@ a {
     .search-panel,
     .table-panel,
     .message-panel,
-    .hero-panel {
+    .hero-panel,
+    .summary-panel {
         padding: 18px;
+    }
+    .summary-grid {
+        grid-template-columns: 1fr;
     }
 }

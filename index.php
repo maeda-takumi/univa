@@ -137,6 +137,8 @@ $totalCount = 0;
 $totalPages = 1;
 $errorMessage = '';
 $infoMessage = '';
+$summaryCount = 0;
+$summaryAmount = 0;
 
 if ($dbExists) {
     try {
@@ -144,20 +146,31 @@ if ($dbExists) {
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
-        $whereSql = '';
+        $whereConditions = [
+            "lower(ifnull(status, '')) IN ('successful', 'succeeded', 'success', 'paid', 'completed', '成功')",
+        ];
         $params = [];
 
         if ($keyword !== '') {
-            $whereSql = "WHERE
+            $whereConditions[] = "(
                 received_at LIKE :kw OR
-                raw_json LIKE :kw";
+                raw_json LIKE :kw
+            )";
             $params[':kw'] = '%' . $keyword . '%';
         }
+        $whereSql = 'WHERE ' . implode(' AND ', $whereConditions);
 
         $countStmt = $pdo->prepare("SELECT COUNT(*) FROM webhook_events {$whereSql}");
         $countStmt->execute($params);
         $totalCount = (int)$countStmt->fetchColumn();
 
+        $summaryStmt = $pdo->prepare("SELECT COUNT(*) AS total_count, COALESCE(SUM(amount), 0) AS total_amount FROM webhook_events {$whereSql}");
+        $summaryStmt->execute($params);
+        $summary = $summaryStmt->fetch();
+        if (is_array($summary)) {
+            $summaryCount = (int)($summary['total_count'] ?? 0);
+            $summaryAmount = (int)($summary['total_amount'] ?? 0);
+        }
         $totalPages = max(1, (int)ceil($totalCount / PER_PAGE));
         if ($page > $totalPages) {
             $page = $totalPages;
@@ -214,6 +227,22 @@ require __DIR__ . '/header.php';
         </div>
     </form>
 </section>
+
+<?php if ($errorMessage === ''): ?>
+    <section class="panel summary-panel">
+        <h3>成功ステータス集計</h3>
+        <div class="summary-grid">
+            <div class="summary-item">
+                <span class="summary-label">対象件数</span>
+                <span class="summary-value"><?= h(number_format($summaryCount)) ?> 件</span>
+            </div>
+            <div class="summary-item">
+                <span class="summary-label">合計金額</span>
+                <span class="summary-value"><?= h(number_format($summaryAmount)) ?></span>
+            </div>
+        </div>
+    </section>
+<?php endif; ?>
 
 <?php if ($errorMessage !== ''): ?>
     <section class="panel message-panel error">
