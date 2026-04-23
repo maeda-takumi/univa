@@ -78,7 +78,7 @@ if ($dbExists) {
                     livemode
                 FROM webhook_events
                 {$whereSql}
-                ORDER BY id DESC
+                ORDER BY datetime(received_at) DESC, id DESC
                 LIMIT :limit OFFSET :offset";
 
         $stmt = $pdo->prepare($sql);
