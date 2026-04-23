@@ -28,14 +28,14 @@ if (!function_exists('tme')) {
     <link rel="stylesheet" href="style/style.css?v=<?php echo h(tme('style/style.css')); ?>">
 </head>
 <body>
-<div class="app-shell sidebar-open">
+<div class="app-shell">
     <header class="site-header">
         <div class="container header-inner">
             <button
                 type="button"
                 class="menu-toggle"
                 id="menuToggle"
-                aria-expanded="true"
+                aria-expanded="false"
                 aria-controls="sidebarPanel"
                 aria-label="サイドバーを開閉"
             >
