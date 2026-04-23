@@ -147,15 +147,53 @@ function status_badge_class(string $status): string
         return 'status-neutral';
     }
 
-    if (str_contains($normalized, 'success') || str_contains($normalized, 'completed') || str_contains($normalized, 'paid')) {
+    if (
+        str_contains($normalized, 'success') ||
+        str_contains($normalized, 'succeeded') ||
+        str_contains($normalized, 'completed') ||
+        str_contains($normalized, 'paid') ||
+        str_contains($normalized, 'captured') ||
+        str_contains($normalized, 'approved') ||
+        str_contains($normalized, '完了') ||
+        str_contains($normalized, '成功') ||
+        str_contains($normalized, '入金済')
+    ) {
         return 'status-success';
     }
 
-    if (str_contains($normalized, 'pending') || str_contains($normalized, 'processing')) {
+    if (
+        str_contains($normalized, 'pending') ||
+        str_contains($normalized, 'processing') ||
+        str_contains($normalized, 'in_progress') ||
+        str_contains($normalized, 'authorized') ||
+        str_contains($normalized, '保留') ||
+        str_contains($normalized, '処理中')
+    ) {
         return 'status-pending';
     }
 
-    if (str_contains($normalized, 'fail') || str_contains($normalized, 'cancel') || str_contains($normalized, 'error') || str_contains($normalized, 'expired')) {
+    if (
+        str_contains($normalized, 'refund') ||
+        str_contains($normalized, 'chargeback') ||
+        str_contains($normalized, 'reversed') ||
+        str_contains($normalized, '返金') ||
+        str_contains($normalized, '取消')
+    ) {
+        return 'status-warning';
+    }
+
+    if (
+        str_contains($normalized, 'fail') ||
+        str_contains($normalized, 'cancel') ||
+        str_contains($normalized, 'error') ||
+        str_contains($normalized, 'expired') ||
+        str_contains($normalized, 'declined') ||
+        str_contains($normalized, 'voided') ||
+        str_contains($normalized, '失敗') ||
+        str_contains($normalized, 'エラー') ||
+        str_contains($normalized, '期限切れ') ||
+        str_contains($normalized, 'キャンセル')
+    ) {
         return 'status-danger';
     }
 

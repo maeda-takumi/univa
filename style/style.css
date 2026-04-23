@@ -189,13 +189,21 @@ a {
 .sidebar-panel {
     padding: 20px;
     position: fixed;
-    right: 16px;
-    top: 90px;
+    left: 0;
+    top: 0;
     width: min(340px, calc(100% - 32px));
+    max-width: 340px;
+    height: 100%;
+    min-height: 100vh;
+    border-radius: 0;
+    border-left: 0;
+    border-top: 0;
+    border-bottom: 0;
     z-index: 40;
-    transform: translateX(120%);
+    transform: translateX(-110%);
     transition: transform .25s ease;
     margin-bottom: 0;
+    overflow-y: auto;
 }
 
 .sidebar-open .sidebar-panel {
@@ -433,6 +441,11 @@ a {
     border-color: #fcd34d;
 }
 
+.status-warning {
+    color: #9a3412;
+    background: #ffedd5;
+    border-color: #fdba74;
+}
 .status-danger {
     color: #991b1b;
     background: #fee2e2;
