@@ -11,6 +11,114 @@ function h(?string $value): string
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
 
+function get_nested_value(array $source, array $path): mixed
+{
+    $current = $source;
+    foreach ($path as $key) {
+        if (!is_array($current) || !array_key_exists($key, $current)) {
+            return null;
+        }
+        $current = $current[$key];
+    }
+    return $current;
+}
+
+function first_non_empty_value(array $values): ?string
+{
+    foreach ($values as $value) {
+        if ($value === null) {
+            continue;
+        }
+
+        $value = trim((string)$value);
+        if ($value !== '') {
+            return $value;
+        }
+    }
+
+    return null;
+}
+
+function parse_json_if_needed(mixed $value): mixed
+{
+    if (!is_string($value)) {
+        return $value;
+    }
+
+    $value = trim($value);
+    if ($value === '') {
+        return $value;
+    }
+
+    $decoded = json_decode($value, true);
+    if (json_last_error() === JSON_ERROR_NONE) {
+        return $decoded;
+    }
+
+    return $value;
+}
+
+function extract_display_data(array $row): array
+{
+    $payload = json_decode((string)($row['raw_json'] ?? ''), true);
+    if (!is_array($payload)) {
+        $payload = [];
+    }
+
+    $tokenMetadata = parse_json_if_needed($payload['トークンメタデータ'] ?? null);
+    if (!is_array($tokenMetadata)) {
+        $tokenMetadata = [];
+    }
+
+    $chargeMetadata = parse_json_if_needed($payload['課金メタデータ'] ?? null);
+    if (!is_array($chargeMetadata)) {
+        $chargeMetadata = [];
+    }
+
+    $paymentDate = first_non_empty_value([
+        $payload['入金日'] ?? null,
+        $payload['イベント作成日時'] ?? null,
+        $payload['課金作成日時'] ?? null,
+        get_nested_value($payload, ['data', 'created_on']),
+        $row['received_at'] ?? null,
+    ]);
+
+    $paymentAmount = first_non_empty_value([
+        $payload['入金額'] ?? null,
+        $payload['課金金額'] ?? null,
+        $payload['イベント金額'] ?? null,
+        $payload['定期課金金額'] ?? null,
+        get_nested_value($payload, ['data', 'charged_amount']),
+        get_nested_value($payload, ['data', 'amount']),
+    ]);
+
+    $payerName = first_non_empty_value([
+        $payload['入金者名'] ?? null,
+        $payload['氏名'] ?? null,
+        $payload['カード名義'] ?? null,
+        $tokenMetadata['univapay-name'] ?? null,
+        $tokenMetadata['name'] ?? null,
+        $chargeMetadata['univapay-name'] ?? null,
+        $chargeMetadata['name'] ?? null,
+        get_nested_value($payload, ['customer', 'name']),
+        get_nested_value($payload, ['data', 'customer_name']),
+    ]);
+
+    $email = first_non_empty_value([
+        $payload['メールアドレス'] ?? null,
+        get_nested_value($payload, ['customer', 'email']),
+        get_nested_value($payload, ['data', 'email']),
+        $tokenMetadata['email'] ?? null,
+        $chargeMetadata['email'] ?? null,
+    ]);
+
+    return [
+        'payment_date' => $paymentDate ?? '',
+        'payment_amount' => $paymentAmount ?? '',
+        'payer_name' => $payerName ?? '',
+        'email' => $email ?? '',
+    ];
+}
 function build_page_url(int $page, string $keyword): string
 {
     $params = ['page' => $page];
@@ -42,13 +150,6 @@ if ($dbExists) {
         if ($keyword !== '') {
             $whereSql = "WHERE
                 received_at LIKE :kw OR
-                event_type LIKE :kw OR
-                status LIKE :kw OR
-                transaction_id LIKE :kw OR
-                charge_id LIKE :kw OR
-                store_id LIKE :kw OR
-                customer_id LIKE :kw OR
-                currency LIKE :kw OR
                 raw_json LIKE :kw";
             $params[':kw'] = '%' . $keyword . '%';
         }
@@ -67,15 +168,7 @@ if ($dbExists) {
         $sql = "SELECT
                     id,
                     received_at,
-                    event_type,
-                    status,
-                    transaction_id,
-                    charge_id,
-                    store_id,
-                    customer_id,
-                    amount,
-                    currency,
-                    livemode
+                    raw_json
                 FROM webhook_events
                 {$whereSql}
                 ORDER BY datetime(received_at) DESC, id DESC
@@ -138,7 +231,7 @@ require __DIR__ . '/header.php';
     <div class="table-header">
         <div>
             <h3>一覧表示</h3>
-            <p>最大25件ずつ表示</p>
+            <p>入金日 / 入金額 / 入金者名 / メールアドレス（最大25件ずつ）</p>
         </div>
         <div class="table-meta">
             <span>ページ <?= h((string)$page) ?> / <?= h((string)$totalPages) ?></span>
@@ -149,39 +242,26 @@ require __DIR__ . '/header.php';
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>ID</th>
-                    <th>受信日時</th>
-                    <th>イベント</th>
-                    <th>ステータス</th>
-                    <th>取引ID</th>
-                    <th>Charge ID</th>
-                    <th>Store ID</th>
-                    <th>Customer ID</th>
-                    <th>金額</th>
-                    <th>通貨</th>
-                    <th>本番</th>
+                    <th>入金日</th>
+                    <th>入金額</th>
+                    <th>入金者名</th>
+                    <th>メールアドレス</th>
                 </tr>
             </thead>
             <tbody>
                 <?php if (!empty($rows)): ?>
                     <?php foreach ($rows as $row): ?>
+                        <?php $display = extract_display_data($row); ?>
                         <tr>
-                            <td><?= h((string)$row['id']) ?></td>
-                            <td><?= h((string)$row['received_at']) ?></td>
-                            <td><span class="pill"><?= h((string)$row['event_type']) ?></span></td>
-                            <td><?= h((string)$row['status']) ?></td>
-                            <td class="mono"><?= h((string)$row['transaction_id']) ?></td>
-                            <td class="mono"><?= h((string)$row['charge_id']) ?></td>
-                            <td class="mono"><?= h((string)$row['store_id']) ?></td>
-                            <td class="mono"><?= h((string)$row['customer_id']) ?></td>
-                            <td><?= $row['amount'] !== null ? number_format((int)$row['amount']) : '' ?></td>
-                            <td><?= h((string)$row['currency']) ?></td>
-                            <td><?= ((int)$row['livemode'] === 1) ? 'Yes' : (((string)$row['livemode'] === '') ? '' : 'No') ?></td>
+                            <td><?= h((string)$display['payment_date']) ?></td>
+                            <td><?= h((string)$display['payment_amount']) ?></td>
+                            <td><?= h((string)$display['payer_name']) ?></td>
+                            <td><?= h((string)$display['email']) ?></td>
                         </tr>
                     <?php endforeach; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="11" class="empty-cell">表示するデータがありません。</td>
+                        <td colspan="4" class="empty-cell">表示するデータがありません。</td>
                     </tr>
                 <?php endif; ?>
             </tbody>
