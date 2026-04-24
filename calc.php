@@ -75,6 +75,7 @@ function extract_display_data(array $row): array
     }
 
     $paymentDate = first_non_empty_value([
+        $row['payment_date'] ?? null,
         $payload['入金日'] ?? null,
         $payload['イベント作成日時'] ?? null,
         $payload['課金作成日時'] ?? null,
@@ -99,7 +100,6 @@ function extract_display_data(array $row): array
 
     return [
         'payment_date' => format_display_datetime($paymentDate),
-        'payment_date' => $paymentDate ?? '',
         'payment_amount' => $paymentAmount ?? '',
         'payer_name' => $payerName ?? '',
         'status' => trim((string)($row['status'] ?? '')),
@@ -122,7 +122,7 @@ if (file_exists(DB_FILE)) {
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
-        $dateExpr = "date(COALESCE(NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), ''), NULLIF(json_extract(raw_json, '$.data.created_on'), ''), received_at))";
+        $dateExpr = "date(COALESCE(NULLIF(payment_date, ''), NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), ''), NULLIF(json_extract(raw_json, '$.data.created_on'), ''), received_at))";
         $bucketExpr = $groupBy === 'month'
             ? "strftime('%Y-%m', {$dateExpr})"
             : $dateExpr;
@@ -145,7 +145,7 @@ if (file_exists(DB_FILE)) {
             }
 
             $offset = ($detailPage - 1) * DETAIL_PER_PAGE;
-            $detailStmt = $pdo->prepare("SELECT id, received_at, raw_json, amount, status FROM webhook_events WHERE {$successCondition} AND {$whereBucket} ORDER BY datetime(received_at) DESC, id DESC LIMIT :limit OFFSET :offset");
+            $detailStmt = $pdo->prepare("SELECT id, received_at, payment_date, raw_json, amount, status FROM webhook_events WHERE {$successCondition} AND {$whereBucket} ORDER BY datetime(received_at) DESC, id DESC LIMIT :limit OFFSET :offset");
             $detailStmt->bindValue(':bucket', $selectedBucket, PDO::PARAM_STR);
             $detailStmt->bindValue(':limit', DETAIL_PER_PAGE, PDO::PARAM_INT);
             $detailStmt->bindValue(':offset', $offset, PDO::PARAM_INT);

@@ -68,6 +68,7 @@ function get_pdo(): PDO
         'CREATE TABLE IF NOT EXISTS webhook_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             received_at TEXT NOT NULL,
+            payment_date TEXT,
             request_method TEXT,
             remote_addr TEXT,
             user_agent TEXT,
@@ -112,6 +113,17 @@ function get_pdo(): PDO
     }
     if (!$hasSource) {
         $pdo->exec("ALTER TABLE webhook_events ADD COLUMN source TEXT NOT NULL DEFAULT 'WEBHOOK'");
+    }
+    $hasPaymentDate = false;
+    foreach ($columns as $column) {
+        if (($column['name'] ?? null) === 'payment_date') {
+            $hasPaymentDate = true;
+            break;
+        }
+    }
+    if (!$hasPaymentDate) {
+        $pdo->exec('ALTER TABLE webhook_events ADD COLUMN payment_date TEXT');
+        $pdo->exec("UPDATE webhook_events SET payment_date = received_at WHERE payment_date IS NULL OR TRIM(payment_date) = ''");
     }
 
     return $pdo;
@@ -245,6 +257,87 @@ function translate_status_to_japanese(?string $statusRaw): ?string
 
     return $statusRaw;
 }
+function translate_event_to_japanese(?string $eventRaw): ?string
+{
+    if ($eventRaw === null) {
+        return null;
+    }
+
+    $normalized = strtolower(trim($eventRaw));
+    if ($normalized === '') {
+        return null;
+    }
+
+    $map = [
+        'charge_finished' => '売上',
+        'charge_created' => '売上作成',
+        'charge_updated' => '売上更新',
+        'charge_captured' => '売上確定',
+        'charge_authorized' => 'オーソリ',
+        'charge_refunded' => '返金',
+        'charge_cancelled' => '取消',
+        'subscription_started' => '定期課金開始',
+        'subscription_renewed' => '定期課金更新',
+        'subscription_suspended' => '定期課金停止',
+        'subscription_cancelled' => '定期課金解約',
+        'token_created' => 'トークン作成',
+        'token_deleted' => 'トークン削除',
+    ];
+
+    if (array_key_exists($normalized, $map)) {
+        return $map[$normalized];
+    }
+
+    if (str_contains($normalized, 'refund')) {
+        return '返金';
+    }
+    if (str_contains($normalized, 'cancel')) {
+        return '取消';
+    }
+    if (str_contains($normalized, 'subscription')) {
+        return '定期課金';
+    }
+    if (str_contains($normalized, 'charge')) {
+        return '売上';
+    }
+    if (str_contains($normalized, 'token')) {
+        return 'トークン';
+    }
+
+    return $eventRaw;
+}
+
+function to_jst_datetime_string(?string $value): ?string
+{
+    if ($value === null) {
+        return null;
+    }
+
+    $text = trim($value);
+    if ($text === '') {
+        return null;
+    }
+
+    $jst = new DateTimeZone('Asia/Tokyo');
+    $formats = [
+        'Y/m/d H:i:s',
+        'Y-m-d H:i:s',
+        DateTimeInterface::ATOM,
+    ];
+
+    foreach ($formats as $format) {
+        $parsed = DateTimeImmutable::createFromFormat($format, $text);
+        if ($parsed instanceof DateTimeImmutable) {
+            return $parsed->setTimezone($jst)->format('Y-m-d H:i:s');
+        }
+    }
+
+    try {
+        return (new DateTimeImmutable($text))->setTimezone($jst)->format('Y-m-d H:i:s');
+    } catch (Throwable) {
+        return null;
+    }
+}
 // =========================
 // Main
 // =========================
@@ -284,7 +377,7 @@ try {
 
     // Univapay payload shapes may vary by event.
     // We store the raw JSON no matter what, and also try to extract common fields.
-    $eventType = first_non_empty([
+    $eventTypeRaw = first_non_empty([
         $payload['event'] ?? null,
         $payload['event_type'] ?? null,
         $payload['type'] ?? null,
@@ -301,6 +394,17 @@ try {
     ]);
     $status = translate_status_to_japanese($statusRaw);
 
+    $eventType = translate_event_to_japanese($eventTypeRaw);
+
+    $paymentDateRaw = first_non_empty([
+        $payload['入金日'] ?? null,
+        $payload['イベント作成日時'] ?? null,
+        $payload['課金作成日時'] ?? null,
+        get_nested($payload, ['data', 'captured_on']),
+        get_nested($payload, ['data', 'paid_on']),
+        get_nested($payload, ['data', 'created_on']),
+        get_nested($payload, ['created_on'])
+    ]);
     $transactionId = first_non_empty([
         $payload['transaction_id'] ?? null,
         $payload['id'] ?? null,
@@ -355,14 +459,16 @@ try {
     $livemode = is_bool($livemodeRaw) ? ($livemodeRaw ? 1 : 0) : null;
 
     $receivedAt = date('Y-m-d H:i:s');
+    $paymentDate = to_jst_datetime_string($paymentDateRaw) ?? to_jst_datetime_string($receivedAt) ?? $receivedAt;
     $commonInsertParams = [
         ':received_at' => $receivedAt,
+        ':payment_date' => $paymentDate,
         ':request_method' => $_SERVER['REQUEST_METHOD'] ?? null,
         ':remote_addr' => $_SERVER['REMOTE_ADDR'] ?? null,
         ':user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
         ':authorization_header' => $authorization !== '' ? $authorization : null,
         ':content_type' => $_SERVER['CONTENT_TYPE'] ?? null,
-        ':event_type' => $eventType,
+        ':event_type' => $eventTypeRaw,
         ':status_raw' => $statusRaw,
         ':transaction_id' => $transactionId,
         ':charge_id' => $chargeId,
@@ -418,6 +524,7 @@ try {
     $stmt = $pdo->prepare(
         'INSERT INTO webhook_events (
             received_at,
+            payment_date,
             request_method,
             remote_addr,
             user_agent,
@@ -437,6 +544,7 @@ try {
             raw_json
         ) VALUES (
             :received_at,
+            :payment_date,
             :request_method,
             :remote_addr,
             :user_agent,
@@ -459,12 +567,13 @@ try {
 
     $stmt->execute([
         ':received_at' => $commonInsertParams[':received_at'],
+        ':payment_date' => $commonInsertParams[':payment_date'],
         ':request_method' => $commonInsertParams[':request_method'],
         ':remote_addr' => $commonInsertParams[':remote_addr'],
         ':user_agent' => $commonInsertParams[':user_agent'],
         ':authorization_header' => $commonInsertParams[':authorization_header'],
         ':content_type' => $commonInsertParams[':content_type'],
-        ':event_type' => $commonInsertParams[':event_type'],
+        ':event_type' => $eventType,
         ':status' => $status,
         ':status_raw' => $commonInsertParams[':status_raw'],
         ':transaction_id' => $commonInsertParams[':transaction_id'],

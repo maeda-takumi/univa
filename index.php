@@ -111,6 +111,7 @@ function extract_display_data(array $row): array
         $webhookMetadata = [];
     }
     $paymentDate = first_non_empty_value([
+        $row['payment_date'] ?? null,
         $payload['入金日'] ?? null,
         $payload['イベント作成日時'] ?? null,
         $payload['課金作成日時'] ?? null,
@@ -292,7 +293,7 @@ if ($dbExists) {
         $whereConditions = ["TRIM(IFNULL(status, '')) <> ''"];
         $params = [];
 
-        $paymentDateExpression = "date(COALESCE(NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), ''), NULLIF(json_extract(raw_json, '$.data.created_on'), ''), received_at))";
+        $paymentDateExpression = "date(COALESCE(NULLIF(payment_date, ''), NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), ''), NULLIF(json_extract(raw_json, '$.data.created_on'), ''), received_at))";
         if ($filters['payment_date_from'] !== '') {
             $whereConditions[] = "{$paymentDateExpression} >= :payment_date_from";
             $params[':payment_date_from'] = $filters['payment_date_from'];
@@ -340,6 +341,7 @@ if ($dbExists) {
         $sql = "SELECT
                     id,
                     received_at,
+                    payment_date,
                     raw_json,
                     event_type,
                     status
