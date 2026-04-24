@@ -284,6 +284,13 @@ if ($dbExists) {
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
+        $tableInfoStmt = $pdo->query("PRAGMA table_info(webhook_events)");
+        $tableColumns = array_map(
+            static fn(array $row): string => (string)($row['name'] ?? ''),
+            $tableInfoStmt->fetchAll()
+        );
+        $hasPaymentDateColumn = in_array('payment_date', $tableColumns, true);
+
         $statusStmt = $pdo->query("SELECT DISTINCT TRIM(status) AS status_value FROM webhook_events WHERE TRIM(IFNULL(status, '')) <> '' ORDER BY status_value ASC");
         $statusOptions = array_values(array_filter(array_map(static fn(array $row): string => (string)($row['status_value'] ?? ''), $statusStmt->fetchAll()), static fn(string $value): bool => $value !== ''));
 
@@ -293,7 +300,15 @@ if ($dbExists) {
         $whereConditions = ["TRIM(IFNULL(status, '')) <> ''"];
         $params = [];
 
-        $paymentDateExpression = "date(COALESCE(NULLIF(payment_date, ''), NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), ''), NULLIF(json_extract(raw_json, '$.data.created_on'), ''), received_at))";
+        $paymentDateSources = [];
+        if ($hasPaymentDateColumn) {
+            $paymentDateSources[] = "NULLIF(payment_date, '')";
+        }
+        $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), '')";
+        $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.data.created_on'), '')";
+        $paymentDateSources[] = "received_at";
+        $paymentDateExpression = 'date(COALESCE(' . implode(', ', $paymentDateSources) . '))';
+
         if ($filters['payment_date_from'] !== '') {
             $whereConditions[] = "{$paymentDateExpression} >= :payment_date_from";
             $params[':payment_date_from'] = $filters['payment_date_from'];
@@ -338,10 +353,12 @@ if ($dbExists) {
 
         $offset = ($page - 1) * PER_PAGE;
 
+        $selectPaymentDate = $hasPaymentDateColumn ? 'payment_date,' : "NULL AS payment_date,";
+
         $sql = "SELECT
                     id,
                     received_at,
-                    payment_date,
+                    {$selectPaymentDate}
                     raw_json,
                     event_type,
                     status
