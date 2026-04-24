@@ -91,8 +91,9 @@ if (file_exists(DB_FILE)) {
         $bucketExpr = $groupBy === 'month'
             ? "strftime('%Y-%m', {$dateExpr})"
             : $dateExpr;
+        $successCondition = "(LOWER(TRIM(IFNULL(status, ''))) = 'success' OR TRIM(IFNULL(status, '')) = '成功')";
 
-        $cardStmt = $pdo->query("SELECT {$bucketExpr} AS bucket, COUNT(*) AS total_count, COALESCE(SUM(amount), 0) AS total_amount FROM webhook_events WHERE TRIM(IFNULL(status, '')) <> '' GROUP BY bucket ORDER BY bucket DESC");
+        $cardStmt = $pdo->query("SELECT {$bucketExpr} AS bucket, COUNT(*) AS total_count, COALESCE(SUM(amount), 0) AS total_amount FROM webhook_events WHERE {$successCondition} GROUP BY bucket ORDER BY bucket DESC");
         $cards = $cardStmt->fetchAll();
 
         if ($selectedBucket !== '') {
@@ -100,7 +101,7 @@ if (file_exists(DB_FILE)) {
                 ? "strftime('%Y-%m', {$dateExpr}) = :bucket"
                 : "{$dateExpr} = :bucket";
 
-            $countStmt = $pdo->prepare("SELECT COUNT(*) FROM webhook_events WHERE TRIM(IFNULL(status, '')) <> '' AND {$whereBucket}");
+            $countStmt = $pdo->prepare("SELECT COUNT(*) FROM webhook_events WHERE {$successCondition} AND {$whereBucket}");
             $countStmt->execute([':bucket' => $selectedBucket]);
             $detailTotalCount = (int)$countStmt->fetchColumn();
             $detailTotalPages = max(1, (int)ceil($detailTotalCount / DETAIL_PER_PAGE));
@@ -109,7 +110,7 @@ if (file_exists(DB_FILE)) {
             }
 
             $offset = ($detailPage - 1) * DETAIL_PER_PAGE;
-            $detailStmt = $pdo->prepare("SELECT id, received_at, raw_json, amount, status FROM webhook_events WHERE TRIM(IFNULL(status, '')) <> '' AND {$whereBucket} ORDER BY datetime(received_at) DESC, id DESC LIMIT :limit OFFSET :offset");
+            $detailStmt = $pdo->prepare("SELECT id, received_at, raw_json, amount, status FROM webhook_events WHERE {$successCondition} AND {$whereBucket} ORDER BY datetime(received_at) DESC, id DESC LIMIT :limit OFFSET :offset");
             $detailStmt->bindValue(':bucket', $selectedBucket, PDO::PARAM_STR);
             $detailStmt->bindValue(':limit', DETAIL_PER_PAGE, PDO::PARAM_INT);
             $detailStmt->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -162,7 +163,7 @@ require __DIR__ . '/header.php';
     <div class="table-header">
         <div>
             <h3><?= $groupBy === 'day' ? '日別' : '月別' ?> 入金集計カード</h3>
-            <p>カードをクリックすると該当データを一覧表示します。</p>
+            <p>カードをクリックすると該当データをポップアップで一覧表示します（成功ステータスのみ）。</p>
         </div>
     </div>
     <div class="summary-cards">
@@ -185,41 +186,58 @@ require __DIR__ . '/header.php';
 </section>
 
 <?php if ($selectedBucket !== ''): ?>
-<section class="panel table-panel">
-    <div class="table-header">
-        <div>
-            <h3>抽出結果: <?= h($selectedBucket) ?></h3>
-            <p><?= h(number_format($detailTotalCount)) ?>件（<?= h((string)$detailPage) ?>/<?= h((string)$detailTotalPages) ?>ページ）</p>
+<div class="modal-backdrop">
+    <section class="panel table-panel modal-panel" role="dialog" aria-modal="true" aria-labelledby="detailModalTitle">
+        <div class="table-header">
+            <div>
+                <h3 id="detailModalTitle">抽出結果: <?= h($selectedBucket) ?></h3>
+                <p><?= h(number_format($detailTotalCount)) ?>件（<?= h((string)$detailPage) ?>/<?= h((string)$detailTotalPages) ?>ページ）</p>
+            </div>
+            <a class="btn btn-secondary" href="calc.php?<?= h(http_build_query(['group_by' => $groupBy])) ?>">閉じる</a>
         </div>
-    </div>
-    <div class="table-wrap">
-        <table class="data-table">
-            <thead>
-                <tr>
-                    <th>入金日</th>
-                    <th>入金額</th>
-                    <th>入金者名</th>
-                    <th>ステータス</th>
-                </tr>
-            </thead>
-            <tbody>
-                <?php if (!empty($detailRows)): ?>
-                    <?php foreach ($detailRows as $row): ?>
-                        <?php $display = extract_display_data($row); ?>
-                        <tr>
-                            <td><?= h((string)$display['payment_date']) ?></td>
-                            <td><?= h(format_jpy_amount($display['payment_amount'])) ?></td>
-                            <td><?= h((string)$display['payer_name']) ?></td>
-                            <td><?= h((string)$display['status']) ?></td>
-                        </tr>
-                    <?php endforeach; ?>
-                <?php else: ?>
-                    <tr><td colspan="4" class="empty-cell">該当データがありません。</td></tr>
-                <?php endif; ?>
-            </tbody>
-        </table>
-    </div>
-</section>
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>入金日</th>
+                        <th>入金額</th>
+                        <th>入金者名</th>
+                        <th>ステータス</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php if (!empty($detailRows)): ?>
+                        <?php foreach ($detailRows as $row): ?>
+                            <?php $display = extract_display_data($row); ?>
+                            <tr>
+                                <td><?= h((string)$display['payment_date']) ?></td>
+                                <td><?= h(format_jpy_amount($display['payment_amount'])) ?></td>
+                                <td><?= h((string)$display['payer_name']) ?></td>
+                                <td><?= h((string)$display['status']) ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php else: ?>
+                        <tr><td colspan="4" class="empty-cell">該当データがありません。</td></tr>
+                    <?php endif; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php if ($detailTotalPages > 1): ?>
+            <div class="pagination">
+                <?php
+                    $prevPage = max(1, $detailPage - 1);
+                    $nextPage = min($detailTotalPages, $detailPage + 1);
+                    $baseParams = ['group_by' => $groupBy, 'bucket' => $selectedBucket];
+                ?>
+                <a class="page-link <?= $detailPage <= 1 ? 'disabled' : '' ?>" href="calc.php?<?= h(http_build_query(array_merge($baseParams, ['detail_page' => $prevPage]))) ?>">前へ</a>
+                <?php for ($i = 1; $i <= $detailTotalPages; $i++): ?>
+                    <a class="page-link <?= $i === $detailPage ? 'active' : '' ?>" href="calc.php?<?= h(http_build_query(array_merge($baseParams, ['detail_page' => $i]))) ?>"><?= h((string)$i) ?></a>
+                <?php endfor; ?>
+                <a class="page-link <?= $detailPage >= $detailTotalPages ? 'disabled' : '' ?>" href="calc.php?<?= h(http_build_query(array_merge($baseParams, ['detail_page' => $nextPage]))) ?>">次へ</a>
+            </div>
+        <?php endif; ?>
+    </section>
+</div>
 <?php endif; ?>
 </div>
 </div>

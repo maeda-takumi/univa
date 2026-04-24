@@ -642,3 +642,21 @@ a {
 .summary-card-count {
     color: var(--muted);
 }
+
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    background: rgba(15, 23, 42, 0.45);
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-panel {
+    margin: 0;
+    width: min(1100px, 100%);
+    max-height: calc(100vh - 40px);
+    overflow-y: auto;
+}
