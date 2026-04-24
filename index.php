@@ -452,21 +452,6 @@ require __DIR__ . '/header.php';
     </form>
 </section>
 
-<?php if ($errorMessage === ''): ?>
-    <section class="panel summary-panel">
-        <h3>ステータスありデータ集計</h3>
-        <div class="summary-grid">
-            <div class="summary-item">
-                <span class="summary-label">対象件数</span>
-                <span class="summary-value"><?= h(number_format($summaryCount)) ?> 件</span>
-            </div>
-            <div class="summary-item">
-                <span class="summary-label">合計金額</span>
-                <span class="summary-value"><?= h(format_jpy_amount($summaryAmount)) ?></span>
-            </div>
-        </div>
-    </section>
-<?php endif; ?>
 
 <?php if ($errorMessage !== ''): ?>
     <section class="panel message-panel error">

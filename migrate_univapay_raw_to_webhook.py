@@ -66,6 +66,33 @@ def normalize_status(status_raw: str | None) -> str | None:
     return status_raw
 
 
+def normalize_event_type(event_type: str | None) -> str | None:
+    if event_type is None:
+        return None
+
+    normalized = event_type.strip().lower()
+    if not normalized:
+        return None
+
+    keyword_mappings = [
+        (("payment", "charge"), "決済"),
+        (("capture",), "売上確定"),
+        (("authorize", "authorise"), "与信確保"),
+        (("cancel", "canceled", "cancelled", "void"), "取消"),
+        (("refund",), "返金"),
+        (("failed", "failure", "error", "decline"), "失敗"),
+        (("pending", "processing"), "処理中"),
+        (("subscription",), "サブスクリプション"),
+        (("customer",), "顧客"),
+        (("token",), "トークン"),
+    ]
+
+    for keywords, jp in keyword_mappings:
+        if any(keyword in normalized for keyword in keywords):
+            return jp
+
+    return event_type
+
 def ensure_destination_schema(conn: sqlite3.Connection) -> None:
     conn.execute(CREATE_DEST_TABLE_SQL)
     for sql in INDEX_SQLS:
@@ -155,7 +182,7 @@ def main() -> int:
             "user_agent": row["user_agent"],
             "authorization_header": row["authorization_header"],
             "content_type": row["content_type"],
-            "event_type": row["event_type"],
+            "event_type": normalize_event_type(row["event_type"]),
             "status": normalize_status(row["status_raw"]),
             "status_raw": row["status_raw"],
             "transaction_id": row["transaction_id"],
