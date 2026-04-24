@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS webhook_events (
     content_type TEXT,
     event_type TEXT,
     status TEXT,
+    status_raw TEXT,
     transaction_id TEXT,
     charge_id TEXT,
     store_id TEXT,
@@ -36,6 +37,7 @@ CREATE TABLE IF NOT EXISTS webhook_events (
     amount INTEGER,
     currency TEXT,
     livemode INTEGER,
+    source TEXT NOT NULL DEFAULT 'CSV',
     raw_json TEXT NOT NULL
 )
 """
@@ -102,6 +104,7 @@ def parse_livemode(mode: str | None) -> int | None:
 
 
 def build_insert_values(row: dict[str, str]) -> dict[str, Any]:
+    status_value = (row.get("課金ステータス") or row.get("返金ステータス") or "").strip() or None
     return {
         "received_at": parse_received_at(row.get("イベント作成日時") or row.get("課金作成日時")),
         "request_method": "CSV_IMPORT",
@@ -110,7 +113,8 @@ def build_insert_values(row: dict[str, str]) -> dict[str, Any]:
         "authorization_header": None,
         "content_type": "text/csv",
         "event_type": (row.get("イベント") or "").strip() or None,
-        "status": (row.get("課金ステータス") or row.get("返金ステータス") or "").strip() or None,
+        "status": status_value,
+        "status_raw": status_value,
         "transaction_id": (row.get("トークンID") or "").strip() or None,
         "charge_id": (row.get("課金ID") or "").strip() or None,
         "store_id": (row.get("店舗") or "").strip() or None,
@@ -118,6 +122,7 @@ def build_insert_values(row: dict[str, str]) -> dict[str, Any]:
         "amount": to_int_or_none(row.get("イベント金額")) or to_int_or_none(row.get("課金金額")),
         "currency": (row.get("イベント通貨") or row.get("課金通貨") or row.get("返金通貨") or "").strip() or None,
         "livemode": parse_livemode(row.get("モード")),
+        "source": "CSV",
         "raw_json": json.dumps(row, ensure_ascii=False),
     }
 
@@ -157,6 +162,13 @@ def main() -> int:
         conn.execute(CREATE_TABLE_SQL)
         for sql in INDEX_SQLS:
             conn.execute(sql)
+        columns = {column[1] for column in conn.execute("PRAGMA table_info(webhook_events)").fetchall()}
+        if "status_raw" not in columns:
+            conn.execute("ALTER TABLE webhook_events ADD COLUMN status_raw TEXT")
+            conn.execute("UPDATE webhook_events SET status_raw = status WHERE status_raw IS NULL")
+        if "source" not in columns:
+            conn.execute("ALTER TABLE webhook_events ADD COLUMN source TEXT NOT NULL DEFAULT 'CSV'")
+            conn.execute("UPDATE webhook_events SET source = 'CSV' WHERE source IS NULL OR TRIM(source) = ''")
 
         conn.executemany(
             """
@@ -169,6 +181,7 @@ def main() -> int:
                 content_type,
                 event_type,
                 status,
+                status_raw,
                 transaction_id,
                 charge_id,
                 store_id,
@@ -176,6 +189,7 @@ def main() -> int:
                 amount,
                 currency,
                 livemode,
+                source,
                 raw_json
             ) VALUES (
                 :received_at,
@@ -186,6 +200,7 @@ def main() -> int:
                 :content_type,
                 :event_type,
                 :status,
+                :status_raw,
                 :transaction_id,
                 :charge_id,
                 :store_id,
@@ -193,6 +208,7 @@ def main() -> int:
                 :amount,
                 :currency,
                 :livemode,
+                :source,
                 :raw_json
             )
             """,
