@@ -354,6 +354,9 @@ if ($dbExists) {
         $params = [];
 
         $paymentDateSources = [];
+        if ($hasPaymentDateColumn) {
+            $paymentDateSources[] = "NULLIF(payment_date, '')";
+        }
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), '')";
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.\\\"イベント作成日時\\\"'), '')";
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.\\\"課金作成日時\\\"'), '')";
@@ -363,9 +366,7 @@ if ($dbExists) {
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.created_on'), '')";
         $paymentDateCoalesce = 'COALESCE(' . implode(', ', $paymentDateSources) . ')';
         $paymentDateExpression = "REPLACE(SUBSTR({$paymentDateCoalesce}, 1, 10), '-', '/')";
-        $paymentDateOrderExpression = $hasPaymentDateColumn
-            ? "datetime(COALESCE(NULLIF(payment_date, ''), {$paymentDateCoalesce}, received_at))"
-            : "datetime(COALESCE({$paymentDateCoalesce}, received_at))";
+        $paymentDateOrderExpression = "datetime(REPLACE(COALESCE({$paymentDateCoalesce}, received_at), '/', '-'))";
 
         if ($filters['payment_date_from'] !== '') {
             $whereConditions[] = "{$paymentDateExpression} >= :payment_date_from";
