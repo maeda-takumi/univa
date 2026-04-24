@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+session_start();
+
 $pageTitle = '入金データ一覧';
 
 const DB_FILE = __DIR__ . '/data/univapay_webhook.sqlite';
@@ -278,16 +280,34 @@ function build_index_filter_query_params(array $filters, int $page): array
     return $params;
 }
 
-$filters = [
-    'payment_date_from' => trim((string)($_GET['payment_date_from'] ?? '')),
-    'payment_date_to' => trim((string)($_GET['payment_date_to'] ?? '')),
-    'payer_name' => trim((string)($_GET['payer_name'] ?? '')),
-    'email' => trim((string)($_GET['email'] ?? '')),
-    'event_type' => trim((string)($_GET['event_type'] ?? '売上')),
-    'status' => trim((string)($_GET['status'] ?? '成功')),
+/** @var array<string, string> $defaultFilters */
+$defaultFilters = [
+    'payment_date_from' => '',
+    'payment_date_to' => '',
+    'payer_name' => '',
+    'email' => '',
+    'event_type' => '売上',
+    'status' => '成功',
 ];
+$sessionFilters = $_SESSION['index_filters'] ?? [];
+if (!is_array($sessionFilters)) {
+    $sessionFilters = [];
+}
+
+$filters = [];
+foreach ($defaultFilters as $key => $defaultValue) {
+    if (array_key_exists($key, $_GET)) {
+        $filters[$key] = trim((string)$_GET[$key]);
+        continue;
+    }
+
+    $storedValue = $sessionFilters[$key] ?? null;
+    $filters[$key] = is_string($storedValue) ? trim($storedValue) : $defaultValue;
+}
+
+$_SESSION['index_filters'] = $filters;
 $page = max(1, (int)($_GET['page'] ?? 1));
-$currentQuery = $_GET;
+$currentQuery = build_index_filter_query_params($filters, $page);
 $preservedIndexQueryParams = build_index_filter_query_params($filters, $page);
 $calcLink = 'calc.php';
 if (!empty($preservedIndexQueryParams)) {
@@ -426,8 +446,6 @@ require __DIR__ . '/header.php';
         </a>
     </div>
     <nav aria-label="サイドバー">
-        <a class="sidebar-link" href="<?= h($calcLink) ?>">日別・月別集計</a>
-        <a class="sidebar-link" href="<?= h($calcLink) ?>">入金集計カード</a>
     </nav>
 </aside>
 <button type="button" class="sidebar-overlay" id="sidebarOverlay" aria-label="サイドバーを閉じる"></button>
