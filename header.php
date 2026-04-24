@@ -23,7 +23,7 @@ if (!function_exists('tme')) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8') ?></title>
+    <title>UNIVA-MIRROR</title>
 
     <!-- ブラウザタブ用アイコン -->
     <link rel="icon" type="image/png" href="img/icon.png?v=<?= h(tme('img/icon.png')); ?>">
@@ -32,7 +32,7 @@ if (!function_exists('tme')) {
     <link rel="apple-touch-icon" href="img/icon.png?v=<?= h(tme('img/icon.png')); ?>">
 
     <!-- iPhoneホーム画面用の表示名 -->
-    <meta name="apple-mobile-web-app-title" content="<?= htmlspecialchars($pageTitle, ENT_QUOTES, 'UTF-8') ?>">
+    <meta name="apple-mobile-web-app-title" content="UNIVA-MIRROR">
 
     <!-- PWAっぽく全画面表示したい場合 -->
     <meta name="apple-mobile-web-app-capable" content="yes">

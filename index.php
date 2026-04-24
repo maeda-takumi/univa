@@ -287,8 +287,8 @@ $defaultFilters = [
     'payment_date_to' => '',
     'payer_name' => '',
     'email' => '',
-    'event_type' => '決済処理完了',
-    'status' => '成功',
+    'event_type' => '',
+    'status' => '',
 ];
 $sessionFilters = $_SESSION['index_filters'] ?? [];
 if (!is_array($sessionFilters)) {
@@ -296,7 +296,12 @@ if (!is_array($sessionFilters)) {
 }
 
 $filters = [];
+$isReset = isset($_GET['reset']) && (string)$_GET['reset'] === '1';
 foreach ($defaultFilters as $key => $defaultValue) {
+    if ($isReset) {
+        $filters[$key] = $defaultValue;
+        continue;
+    }
     if (array_key_exists($key, $_GET)) {
         $filters[$key] = trim((string)$_GET[$key]);
         continue;
@@ -357,18 +362,18 @@ if ($dbExists) {
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.data.created_on'), '')";
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.created_on'), '')";
         $paymentDateCoalesce = 'COALESCE(' . implode(', ', $paymentDateSources) . ')';
-        $paymentDateExpression = 'date(' . $paymentDateCoalesce . ')';
+        $paymentDateExpression = "REPLACE(SUBSTR({$paymentDateCoalesce}, 1, 10), '-', '/')";
         $paymentDateOrderExpression = $hasPaymentDateColumn
             ? "datetime(COALESCE(NULLIF(payment_date, ''), {$paymentDateCoalesce}, received_at))"
             : "datetime(COALESCE({$paymentDateCoalesce}, received_at))";
 
         if ($filters['payment_date_from'] !== '') {
             $whereConditions[] = "{$paymentDateExpression} >= :payment_date_from";
-            $params[':payment_date_from'] = $filters['payment_date_from'];
+            $params[':payment_date_from'] = str_replace('-', '/', $filters['payment_date_from']);
         }
         if ($filters['payment_date_to'] !== '') {
             $whereConditions[] = "{$paymentDateExpression} <= :payment_date_to";
-            $params[':payment_date_to'] = $filters['payment_date_to'];
+            $params[':payment_date_to'] = str_replace('-', '/', $filters['payment_date_to']);
         }
         if ($filters['payer_name'] !== '') {
             $whereConditions[] = "raw_json LIKE :payer_name";
@@ -498,8 +503,7 @@ require __DIR__ . '/header.php';
         </div>
         <div class="search-actions">
             <button type="submit" class="btn btn-primary">検索</button>
-            <a href="index.php" class="btn btn-secondary">リセット</a>
-        </div>
+            <a href="index.php?reset=1" class="btn btn-secondary">リセット</a>
     </form>
 </section>
 
