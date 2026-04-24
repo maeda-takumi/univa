@@ -155,7 +155,13 @@ function extract_display_data(array $row): array
         'payment_amount' => $paymentAmount ?? '',
         'payer_name' => $payerName ?? '',
         'email' => $email ?? '',
-        'event_type' => trim((string)($row['event_type'] ?? '')),
+        'event_type' => first_non_empty_value([
+            $row['event_type'] ?? null,
+            $payload['イベント'] ?? null,
+            $payload['イベントタイプ'] ?? null,
+            $payload['event_type'] ?? null,
+            get_nested_value($payload, ['event', 'type']),
+        ]) ?? '',
         'status' => trim((string)($row['status'] ?? '')),
     ];
 }
@@ -335,6 +341,7 @@ if ($dbExists) {
                     id,
                     received_at,
                     raw_json,
+                    event_type,
                     status
                 FROM webhook_events
                 {$whereSql}
