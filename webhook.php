@@ -74,6 +74,7 @@ function get_pdo(): PDO
             content_type TEXT,
             event_type TEXT,
             status TEXT,
+            status_raw TEXT,
             transaction_id TEXT,
             charge_id TEXT,
             store_id TEXT,
@@ -89,6 +90,18 @@ function get_pdo(): PDO
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webhook_events_event_type ON webhook_events(event_type)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webhook_events_transaction_id ON webhook_events(transaction_id)');
 
+    $columns = $pdo->query('PRAGMA table_info(webhook_events)')->fetchAll();
+    $hasStatusRaw = false;
+    foreach ($columns as $column) {
+        if (($column['name'] ?? null) === 'status_raw') {
+            $hasStatusRaw = true;
+            break;
+        }
+    }
+    if (!$hasStatusRaw) {
+        $pdo->exec('ALTER TABLE webhook_events ADD COLUMN status_raw TEXT');
+        $pdo->exec("UPDATE webhook_events SET status_raw = status WHERE status_raw IS NULL");
+    }
     return $pdo;
 }
 
@@ -131,6 +144,59 @@ function write_error_log(string $message): void
     file_put_contents(LOG_FILE, $line, FILE_APPEND);
 }
 
+function translate_status_to_japanese(?string $statusRaw): ?string
+{
+    if ($statusRaw === null) {
+        return null;
+    }
+
+    $normalized = strtolower(trim($statusRaw));
+    if ($normalized === '') {
+        return null;
+    }
+
+    if (
+        str_contains($normalized, 'success') ||
+        str_contains($normalized, 'succeeded') ||
+        str_contains($normalized, 'completed') ||
+        str_contains($normalized, 'paid') ||
+        str_contains($normalized, 'captured') ||
+        str_contains($normalized, 'approved')
+    ) {
+        return '成功';
+    }
+
+    if (
+        str_contains($normalized, 'pending') ||
+        str_contains($normalized, 'processing') ||
+        str_contains($normalized, 'in_progress') ||
+        str_contains($normalized, 'authorized') ||
+        str_contains($normalized, 'awaiting')
+    ) {
+        return '処理中';
+    }
+
+    if (
+        str_contains($normalized, 'refund') ||
+        str_contains($normalized, 'chargeback') ||
+        str_contains($normalized, 'reversed')
+    ) {
+        return '返金/取消';
+    }
+
+    if (
+        str_contains($normalized, 'fail') ||
+        str_contains($normalized, 'cancel') ||
+        str_contains($normalized, 'error') ||
+        str_contains($normalized, 'expired') ||
+        str_contains($normalized, 'declined') ||
+        str_contains($normalized, 'voided')
+    ) {
+        return '失敗';
+    }
+
+    return $statusRaw;
+}
 // =========================
 // Main
 // =========================
@@ -177,12 +243,15 @@ try {
         get_nested($payload, ['data', 'event'])
     ]);
 
-    $status = first_non_empty([
+    $statusRaw = first_non_empty([
         $payload['status'] ?? null,
         get_nested($payload, ['data', 'status']),
+        get_nested($payload, ['data', 'three_ds', 'status']),
+        get_nested($payload, ['data', 'data', 'three_ds', 'status']),
         get_nested($payload, ['transaction', 'status']),
         get_nested($payload, ['charge', 'status'])
     ]);
+    $status = translate_status_to_japanese($statusRaw);
 
     $transactionId = first_non_empty([
         $payload['transaction_id'] ?? null,
@@ -249,6 +318,7 @@ try {
             content_type,
             event_type,
             status,
+            status_raw,
             transaction_id,
             charge_id,
             store_id,
@@ -266,6 +336,7 @@ try {
             :content_type,
             :event_type,
             :status,
+            :status_raw,
             :transaction_id,
             :charge_id,
             :store_id,
@@ -286,6 +357,7 @@ try {
         ':content_type' => $_SERVER['CONTENT_TYPE'] ?? null,
         ':event_type' => $eventType,
         ':status' => $status,
+        ':status_raw' => $statusRaw,
         ':transaction_id' => $transactionId,
         ':charge_id' => $chargeId,
         ':store_id' => $storeId,
