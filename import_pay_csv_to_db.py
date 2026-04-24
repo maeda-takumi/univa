@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pay.csv を webhook 用 SQLite(DB)へ初期投入するスクリプト。"""
+"""pay.csv を SQLite の 3テーブル構成に取り込む。"""
 
 from __future__ import annotations
 
@@ -13,13 +13,28 @@ from typing import Any
 
 ROOT_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_PATH = ROOT_DIR / "data" / "univapay_webhook.sqlite"
-CSV_CANDIDATES = [
-    ROOT_DIR / "data" / "pay.csv",
-    ROOT_DIR / "date" / "pay.csv",
-]
+CSV_CANDIDATES = [ROOT_DIR / "data" / "pay.csv", ROOT_DIR / "date" / "pay.csv"]
 
-CREATE_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS webhook_events (
+SCHEMA_SQL = """
+PRAGMA journal_mode = WAL;
+
+CREATE TABLE IF NOT EXISTS csv_raw_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    imported_at TEXT NOT NULL,
+    occurred_at_raw TEXT,
+    event_type_raw TEXT,
+    status_raw TEXT,
+    transaction_id TEXT,
+    charge_id TEXT,
+    store_id TEXT,
+    customer_ref TEXT,
+    amount_raw TEXT,
+    currency_raw TEXT,
+    livemode_raw TEXT,
+    raw_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS webhook_raw_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     received_at TEXT NOT NULL,
     request_method TEXT,
@@ -27,112 +42,189 @@ CREATE TABLE IF NOT EXISTS webhook_events (
     user_agent TEXT,
     authorization_header TEXT,
     content_type TEXT,
-    event_type TEXT,
-    status TEXT,
+    event_type_raw TEXT,
     status_raw TEXT,
     transaction_id TEXT,
     charge_id TEXT,
     store_id TEXT,
-    customer_id TEXT,
+    customer_ref TEXT,
+    amount_raw TEXT,
+    currency_raw TEXT,
+    livemode_raw TEXT,
+    payload_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS payment_facts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL CHECK(source IN ('CSV', 'WEBHOOK')),
+    source_event_id INTEGER NOT NULL,
+    occurred_at_jst TEXT NOT NULL,
+    payment_date_jst TEXT NOT NULL,
+    event_type_norm TEXT,
+    status_norm TEXT,
+    status_raw TEXT,
+    transaction_id TEXT,
+    charge_id TEXT,
+    store_id TEXT,
+    customer_ref TEXT,
     amount INTEGER,
     currency TEXT,
     livemode INTEGER,
-    source TEXT NOT NULL DEFAULT 'CSV',
-    raw_json TEXT NOT NULL
-)
+    payer_name TEXT,
+    email TEXT,
+    raw_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(source, source_event_id)
+);
+CREATE INDEX IF NOT EXISTS idx_payment_facts_payment_date ON payment_facts(payment_date_jst);
+CREATE INDEX IF NOT EXISTS idx_payment_facts_status ON payment_facts(status_norm);
+CREATE INDEX IF NOT EXISTS idx_payment_facts_txid ON payment_facts(transaction_id);
+
+DROP TABLE IF EXISTS webhook_events;
+DROP VIEW IF EXISTS webhook_events;
+CREATE VIEW webhook_events AS
+SELECT
+    id,
+    occurred_at_jst AS received_at,
+    payment_date_jst AS payment_date,
+    NULL AS request_method,
+    NULL AS remote_addr,
+    NULL AS user_agent,
+    NULL AS authorization_header,
+    NULL AS content_type,
+    event_type_norm AS event_type,
+    status_norm AS status,
+    status_raw,
+    transaction_id,
+    charge_id,
+    store_id,
+    customer_ref AS customer_id,
+    amount,
+    currency,
+    livemode,
+    source,
+    raw_json
+FROM payment_facts;
 """
-
-INDEX_SQLS = [
-    "CREATE INDEX IF NOT EXISTS idx_webhook_events_received_at ON webhook_events(received_at)",
-    "CREATE INDEX IF NOT EXISTS idx_webhook_events_event_type ON webhook_events(event_type)",
-    "CREATE INDEX IF NOT EXISTS idx_webhook_events_transaction_id ON webhook_events(transaction_id)",
-]
-
 
 
 def detect_csv_path(explicit_path: str | None) -> Path:
     if explicit_path:
-        path = Path(explicit_path)
-        if not path.is_absolute():
-            path = ROOT_DIR / path
-        return path
-
-    for candidate in CSV_CANDIDATES:
-        if candidate.exists():
-            return candidate
+        p = Path(explicit_path)
+        if not p.is_absolute():
+            p = ROOT_DIR / p
+        return p
+    for c in CSV_CANDIDATES:
+        if c.exists():
+            return c
 
     return CSV_CANDIDATES[0]
 
-
-
-def to_int_or_none(value: str | None) -> int | None:
-    if value is None:
-        return None
-    stripped = value.strip().replace(",", "")
-    if stripped == "":
-        return None
-    try:
-        return int(float(stripped))
-    except ValueError:
-        return None
-
-
-
-def parse_received_at(value: str | None) -> str:
+def parse_dt_jst(value: str | None) -> str:
     if value:
-        text = value.strip()
-        if text:
+        t = value.strip()
+        if t:
             for fmt in ("%Y/%m/%d %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
                 try:
-                    return datetime.strptime(text, fmt).strftime("%Y-%m-%d %H:%M:%S")
+                    return datetime.strptime(t, fmt).strftime("%Y-%m-%d %H:%M:%S")
                 except ValueError:
                     pass
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+def to_int_or_none(value: str | None) -> int | None:
+    if value is None:
+        return None
+    s = value.strip().replace(",", "")
+    if not s:
+        return None
+    try:
+        return int(float(s))
+    except ValueError:
+        return None
+
+
+def normalize_status(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    n = raw.strip().lower()
+    if not n:
+        return None
+    if any(w in n for w in ("success", "succeeded", "completed", "paid", "captured", "approved", "成功", "完了")):
+        return "成功"
+    if any(w in n for w in ("pending", "processing", "in_progress", "authorized", "awaiting", "処理中", "保留")):
+        return "処理中"
+    if any(w in n for w in ("refund", "chargeback", "reversed", "返金", "取消")):
+        return "返金/取消"
+    if any(w in n for w in ("fail", "cancel", "error", "expired", "declined", "voided", "失敗", "エラー", "キャンセル")):
+        return "失敗"
+    return raw
+
+
+def normalize_event(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    n = raw.strip().lower()
+    if not n:
+        return None
+    direct = {
+        "charge_finished": "売上",
+        "charge_pending": "処理待ち",
+        "charge_canceled": "キャンセル",
+        "charge_cancelled": "キャンセル",
+        "charge_refunded": "赤伝返金",
+        "chargeback_created": "チャージバック",
+        "token_created": "リカーリングトークン発行",
+        "token_three_ds_updated": "3-Dセキュア認証",
+    }
+    if n in direct:
+        return direct[n]
+    mapping = [
+        (("three_ds", "3ds"), "3-Dセキュア認証"),
+        (("token",), "リカーリングトークン発行"),
+        (("chargeback",), "チャージバック"),
+        (("refund",), "赤伝返金"),
+        (("cancel", "canceled", "cancelled", "void"), "キャンセル"),
+        (("pending", "processing"), "処理待ち"),
+        (("failed", "failure", "error", "decline"), "売上失敗"),
+        (("payment", "charge", "capture", "売上"), "売上"),
+    ]
+    for keywords, out in mapping:
+        if any(k in n for k in keywords):
+            return out
+    return raw
+
+
+def ensure_schema(conn: sqlite3.Connection, reset_all: bool) -> None:
+    if reset_all:
+        conn.executescript(
+            """
+            DROP TABLE IF EXISTS webhook_events;
+            DROP VIEW IF EXISTS webhook_events;
+            DROP TABLE IF EXISTS payment_facts;
+            DROP TABLE IF EXISTS csv_raw_events;
+            DROP TABLE IF EXISTS webhook_raw_events;
+            """
+        )
+    conn.executescript(SCHEMA_SQL)
 
 def parse_livemode(mode: str | None) -> int | None:
     if mode is None:
         return None
-    normalized = mode.strip().lower()
-    if normalized in {"live", "本番", "prod", "production"}:
+    n = mode.strip().lower()
+    if n in {"live", "本番", "prod", "production"}:
         return 1
-    if normalized in {"test", "sandbox", "開発"}:
+    if n in {"test", "sandbox", "開発"}:
         return 0
     return None
 
-
-
-def build_insert_values(row: dict[str, str]) -> dict[str, Any]:
-    status_value = (row.get("課金ステータス") or row.get("返金ステータス") or "").strip() or None
-    return {
-        "received_at": parse_received_at(row.get("イベント作成日時") or row.get("課金作成日時")),
-        "request_method": "CSV_IMPORT",
-        "remote_addr": None,
-        "user_agent": "import_pay_csv_to_db.py",
-        "authorization_header": None,
-        "content_type": "text/csv",
-        "event_type": (row.get("イベント") or "").strip() or None,
-        "status": status_value,
-        "status_raw": status_value,
-        "transaction_id": (row.get("トークンID") or "").strip() or None,
-        "charge_id": (row.get("課金ID") or "").strip() or None,
-        "store_id": (row.get("店舗") or "").strip() or None,
-        "customer_id": (row.get("メールアドレス") or row.get("電話番号") or "").strip() or None,
-        "amount": to_int_or_none(row.get("イベント金額")) or to_int_or_none(row.get("課金金額")),
-        "currency": (row.get("イベント通貨") or row.get("課金通貨") or row.get("返金通貨") or "").strip() or None,
-        "livemode": parse_livemode(row.get("モード")),
-        "source": "CSV",
-        "raw_json": json.dumps(row, ensure_ascii=False),
-    }
-
-
-
 def main() -> int:
-    parser = argparse.ArgumentParser(description="pay.csv を webhook_events テーブルに投入します")
-    parser.add_argument("--csv", dest="csv_path", help="CSVファイルパス (未指定時は data/pay.csv, date/pay.csv を探索)")
-    parser.add_argument("--db", dest="db_path", default=str(DEFAULT_DB_PATH), help="SQLite DBファイルパス")
-    parser.add_argument("--dry-run", action="store_true", help="DBに書き込まず件数だけ確認")
+    parser = argparse.ArgumentParser(description="pay.csv を 3テーブル構成へ投入")
+    parser.add_argument("--csv", dest="csv_path")
+    parser.add_argument("--db", dest="db_path", default=str(DEFAULT_DB_PATH))
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--reset-all", action="store_true", help="既存データを破棄して作り直す")
     args = parser.parse_args()
 
     csv_path = detect_csv_path(args.csv_path)
@@ -143,81 +235,92 @@ def main() -> int:
     if not csv_path.exists():
         raise FileNotFoundError(f"CSVファイルが見つかりません: {csv_path}")
 
-    rows_to_insert: list[dict[str, Any]] = []
+    rows: list[dict[str, str]] = []
     with csv_path.open("r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            rows_to_insert.append(build_insert_values(row))
+        rows = list(csv.DictReader(f))
+
 
     print(f"CSV: {csv_path}")
-    print(f"読込件数: {len(rows_to_insert)}")
+    print(f"読込件数: {len(rows)}")
 
     if args.dry_run:
-        print("dry-run のため DB には保存していません。")
+        print("dry-run のため書き込みなし")
         return 0
 
     db_path.parent.mkdir(parents=True, exist_ok=True)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     with sqlite3.connect(db_path) as conn:
-        conn.execute(CREATE_TABLE_SQL)
-        for sql in INDEX_SQLS:
-            conn.execute(sql)
-        columns = {column[1] for column in conn.execute("PRAGMA table_info(webhook_events)").fetchall()}
-        if "status_raw" not in columns:
-            conn.execute("ALTER TABLE webhook_events ADD COLUMN status_raw TEXT")
-            conn.execute("UPDATE webhook_events SET status_raw = status WHERE status_raw IS NULL")
-        if "source" not in columns:
-            conn.execute("ALTER TABLE webhook_events ADD COLUMN source TEXT NOT NULL DEFAULT 'CSV'")
-            conn.execute("UPDATE webhook_events SET source = 'CSV' WHERE source IS NULL OR TRIM(source) = ''")
+        ensure_schema(conn, args.reset_all)
 
-        conn.executemany(
-            """
-            INSERT INTO webhook_events (
-                received_at,
-                request_method,
-                remote_addr,
-                user_agent,
-                authorization_header,
-                content_type,
-                event_type,
-                status,
-                status_raw,
-                transaction_id,
-                charge_id,
-                store_id,
-                customer_id,
-                amount,
-                currency,
-                livemode,
-                source,
-                raw_json
-            ) VALUES (
-                :received_at,
-                :request_method,
-                :remote_addr,
-                :user_agent,
-                :authorization_header,
-                :content_type,
-                :event_type,
-                :status,
-                :status_raw,
-                :transaction_id,
-                :charge_id,
-                :store_id,
-                :customer_id,
-                :amount,
-                :currency,
-                :livemode,
-                :source,
-                :raw_json
+        for row in rows:
+            event_type_raw = (row.get("イベント") or "").strip() or None
+            status_raw = (row.get("課金ステータス") or row.get("返金ステータス") or "").strip() or None
+            occurred_raw = (row.get("イベント作成日時") or row.get("課金作成日時") or "").strip() or None
+            amount_raw = (row.get("イベント金額") or row.get("課金金額") or "").strip() or None
+            currency_raw = (row.get("イベント通貨") or row.get("課金通貨") or row.get("返金通貨") or "").strip() or None
+
+            cur = conn.execute(
+                """
+                INSERT INTO csv_raw_events (
+                    imported_at, occurred_at_raw, event_type_raw, status_raw,
+                    transaction_id, charge_id, store_id, customer_ref,
+                    amount_raw, currency_raw, livemode_raw, raw_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    now,
+                    occurred_raw,
+                    event_type_raw,
+                    status_raw,
+                    (row.get("トークンID") or "").strip() or None,
+                    (row.get("課金ID") or "").strip() or None,
+                    (row.get("店舗") or "").strip() or None,
+                    (row.get("メールアドレス") or row.get("電話番号") or "").strip() or None,
+                    amount_raw,
+                    currency_raw,
+                    (row.get("モード") or "").strip() or None,
+                    json.dumps(row, ensure_ascii=False),
+                ),
             )
-            """,
-            rows_to_insert,
-        )
+            source_event_id = cur.lastrowid
+
+            conn.execute(
+                """
+                INSERT INTO payment_facts (
+                    source, source_event_id, occurred_at_jst, payment_date_jst,
+                    event_type_norm, status_norm, status_raw, transaction_id,
+                    charge_id, store_id, customer_ref, amount, currency, livemode,
+                    payer_name, email, raw_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "CSV",
+                    source_event_id,
+                    parse_dt_jst(occurred_raw),
+                    parse_dt_jst(occurred_raw),
+                    normalize_event(event_type_raw),
+                    normalize_status(status_raw),
+                    status_raw,
+                    (row.get("トークンID") or "").strip() or None,
+                    (row.get("課金ID") or "").strip() or None,
+                    (row.get("店舗") or "").strip() or None,
+                    (row.get("メールアドレス") or row.get("電話番号") or "").strip() or None,
+                    to_int_or_none(amount_raw),
+                    currency_raw,
+                    parse_livemode(row.get("モード")),
+                    (row.get("入金者名") or row.get("氏名") or row.get("カード名義") or "").strip() or None,
+                    (row.get("メールアドレス") or "").strip() or None,
+                    json.dumps(row, ensure_ascii=False),
+                    now,
+                    now,
+                ),
+            )
+
         conn.commit()
 
     print(f"保存先DB: {db_path}")
-    print(f"追加件数: {len(rows_to_insert)}")
+    print(f"追加件数: {len(rows)}")
     return 0
 
 

@@ -1,83 +1,44 @@
 #!/usr/bin/env python3
-"""univapay_webhook_raw.sqlite のデータを univapay_webhook.sqlite へ移植するスクリプト。"""
+"""webhook_raw_events から payment_facts を再生成する。"""
 
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 ROOT_DIR = Path(__file__).resolve().parent
-DEFAULT_RAW_DB_PATH = ROOT_DIR / "data" / "univapay_webhook_raw.sqlite"
-DEFAULT_DEST_DB_PATH = ROOT_DIR / "data" / "univapay_webhook.sqlite"
+DEFAULT_DB_PATH = ROOT_DIR / "data" / "univapay_webhook.sqlite"
 
-CREATE_DEST_TABLE_SQL = """
-CREATE TABLE IF NOT EXISTS webhook_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    received_at TEXT NOT NULL,
-    payment_date TEXT,
-    request_method TEXT,
-    remote_addr TEXT,
-    user_agent TEXT,
-    authorization_header TEXT,
-    content_type TEXT,
-    event_type TEXT,
-    status TEXT,
-    status_raw TEXT,
-    transaction_id TEXT,
-    charge_id TEXT,
-    store_id TEXT,
-    customer_id TEXT,
-    amount INTEGER,
-    currency TEXT,
-    livemode INTEGER,
-    source TEXT NOT NULL DEFAULT 'WEBHOOK',
-    raw_json TEXT NOT NULL
-)
-"""
-
-INDEX_SQLS = [
-    "CREATE INDEX IF NOT EXISTS idx_webhook_events_received_at ON webhook_events(received_at)",
-    "CREATE INDEX IF NOT EXISTS idx_webhook_events_event_type ON webhook_events(event_type)",
-    "CREATE INDEX IF NOT EXISTS idx_webhook_events_transaction_id ON webhook_events(transaction_id)",
-]
-
-
-def normalize_status(status_raw: str | None) -> str | None:
-    if status_raw is None:
+def normalize_status(raw: str | None) -> str | None:
+    if raw is None:
         return None
 
-    normalized = status_raw.strip().lower()
-    if not normalized:
+    n = raw.strip().lower()
+    if not n:
         return None
 
-    if any(word in normalized for word in ("success", "succeeded", "completed", "paid", "captured", "approved")):
+    if any(w in n for w in ("success", "succeeded", "completed", "paid", "captured", "approved", "成功", "完了")):
         return "成功"
 
-    if any(word in normalized for word in ("pending", "processing", "in_progress", "authorized", "awaiting")):
+    if any(w in n for w in ("pending", "processing", "in_progress", "authorized", "awaiting", "処理中", "保留")):
         return "処理中"
-
-    if any(word in normalized for word in ("refund", "chargeback", "reversed")):
+    if any(w in n for w in ("refund", "chargeback", "reversed", "返金", "取消")):
         return "返金/取消"
-
-    if any(word in normalized for word in ("fail", "cancel", "error", "expired", "declined", "voided")):
+    if any(w in n for w in ("fail", "cancel", "error", "expired", "declined", "voided", "失敗", "エラー", "キャンセル")):
         return "失敗"
+    return raw
 
-    return status_raw
-
-
-def normalize_event_type(event_type: str | None) -> str | None:
-    if event_type is None:
+def normalize_event(raw: str | None) -> str | None:
+    if raw is None:
         return None
-
-    normalized = event_type.strip().lower()
-    if not normalized:
+    n = raw.strip().lower()
+    if not n:
         return None
-
-    # CSV 取り込み時の event_type（例: 売上 / 処理待ち / リカーリングトークン発行）に寄せる。
-    # まずは webhook の代表的なイベント名を明示的にマップし、
-    # その後にキーワードベースでフォールバックする。
-    direct_mappings = {
+    direct = {
         "charge_finished": "売上",
         "charge_pending": "処理待ち",
         "charge_canceled": "キャンセル",
@@ -87,10 +48,9 @@ def normalize_event_type(event_type: str | None) -> str | None:
         "token_created": "リカーリングトークン発行",
         "token_three_ds_updated": "3-Dセキュア認証",
     }
-    if normalized in direct_mappings:
-        return direct_mappings[normalized]
-    
-    keyword_mappings = [
+    if n in direct:
+        return direct[n]
+    mapping = [
         (("three_ds", "3ds"), "3-Dセキュア認証"),
         (("token",), "リカーリングトークン発行"),
         (("chargeback",), "チャージバック"),
@@ -102,168 +62,132 @@ def normalize_event_type(event_type: str | None) -> str | None:
 
     ]
 
-    for keywords, jp in keyword_mappings:
-        if any(keyword in normalized for keyword in keywords):
-            return jp
-
-    return event_type
-
-def ensure_destination_schema(conn: sqlite3.Connection) -> None:
-    conn.execute(CREATE_DEST_TABLE_SQL)
-    for sql in INDEX_SQLS:
-        conn.execute(sql)
-
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(webhook_events)").fetchall()}
-
-    if "status_raw" not in columns:
-        conn.execute("ALTER TABLE webhook_events ADD COLUMN status_raw TEXT")
-        conn.execute("UPDATE webhook_events SET status_raw = status WHERE status_raw IS NULL")
-
-    if "source" not in columns:
-        conn.execute("ALTER TABLE webhook_events ADD COLUMN source TEXT NOT NULL DEFAULT 'WEBHOOK'")
-        conn.execute("UPDATE webhook_events SET source = 'WEBHOOK' WHERE source IS NULL OR TRIM(source) = ''")
-
-    if "payment_date" not in columns:
-        conn.execute("ALTER TABLE webhook_events ADD COLUMN payment_date TEXT")
-        conn.execute("UPDATE webhook_events SET payment_date = received_at WHERE payment_date IS NULL OR TRIM(payment_date) = ''")
+    for keys, out in mapping:
+        if any(k in n for k in keys):
+            return out
+    return raw
 
 
-def fetch_raw_rows(raw_conn: sqlite3.Connection) -> list[sqlite3.Row]:
-    raw_conn.row_factory = sqlite3.Row
-    return raw_conn.execute(
-        """
-        SELECT
-            received_at,
-            request_method,
-            remote_addr,
-            user_agent,
-            authorization_header,
-            content_type,
-            event_type,
-            status_raw,
-            transaction_id,
-            charge_id,
-            store_id,
-            customer_id,
-            amount,
-            currency,
-            livemode,
-            raw_json
-        FROM webhook_raw_events
-        ORDER BY id ASC
-        """
-    ).fetchall()
+def to_jst(value: str | None) -> str:
+    if value:
+        t = value.strip()
+        if t:
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
+                try:
+                    dt = datetime.strptime(t, fmt).replace(tzinfo=timezone.utc)
+                    return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    pass
+            try:
+                dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
+                return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                pass
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def resolve_db_path(path: str, *, default: Path) -> Path:
-    p = Path(path) if path else default
-    if not p.is_absolute():
-        p = ROOT_DIR / p
-    return p
+def payload_value(payload: dict[str, Any], *keys: str) -> str | None:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None and str(value).strip() != "":
+            return str(value)
+    return None
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="univapay_webhook_raw.sqlite から univapay_webhook.sqlite へ移植します")
-    parser.add_argument("--raw-db", default=str(DEFAULT_RAW_DB_PATH), help="移植元 SQLite ファイル")
-    parser.add_argument("--dest-db", default=str(DEFAULT_DEST_DB_PATH), help="移植先 SQLite ファイル")
-    parser.add_argument("--dry-run", action="store_true", help="移植件数の確認のみ (書き込みなし)")
+    parser = argparse.ArgumentParser(description="webhook_raw_events から payment_facts を再構築")
+    parser.add_argument("--db", default=str(DEFAULT_DB_PATH))
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--truncate-facts", action="store_true", help="payment_facts から WEBHOOK ソースを先に削除")
     args = parser.parse_args()
 
-    raw_db_path = resolve_db_path(args.raw_db, default=DEFAULT_RAW_DB_PATH)
-    dest_db_path = resolve_db_path(args.dest_db, default=DEFAULT_DEST_DB_PATH)
+    db_path = Path(args.db)
+    if not db_path.is_absolute():
+        db_path = ROOT_DIR / db_path
 
-    if not raw_db_path.exists():
-        raise FileNotFoundError(f"移植元DBが見つかりません: {raw_db_path}")
+    with sqlite3.connect(db_path) as conn:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute("SELECT * FROM webhook_raw_events ORDER BY id ASC").fetchall()
 
-    with sqlite3.connect(raw_db_path) as raw_conn:
-        rows = fetch_raw_rows(raw_conn)
+        print(f"DB: {db_path}")
+        print(f"対象Webhook件数: {len(rows)}")
+        if args.dry_run:
+            print("dry-run のため書き込みなし")
+            return 0
 
-    print(f"移植元: {raw_db_path}")
-    print(f"移植先: {dest_db_path}")
-    print(f"移植対象件数: {len(rows)}")
+        if args.truncate_facts:
+            conn.execute("DELETE FROM payment_facts WHERE source = 'WEBHOOK'")
 
-    if args.dry_run:
-        print("dry-run のため書き込みは行っていません。")
-        return 0
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        inserted = 0
+        for row in rows:
+            payload = json.loads(row["payload_json"]) if row["payload_json"] else {}
+            if not isinstance(payload, dict):
+                payload = {}
 
-    dest_db_path.parent.mkdir(parents=True, exist_ok=True)
+            occurred = payload_value(payload, "入金日", "イベント作成日時", "課金作成日時") or row["received_at"]
+            payer_name = payload_value(payload, "入金者名", "氏名", "カード名義")
+            email = payload_value(payload, "メールアドレス", "email")
+            amount = None
+            raw_amount = row["amount_raw"]
+            if raw_amount is not None:
+                try:
+                    amount = int(float(str(raw_amount).replace(",", "")))
+                except ValueError:
+                    amount = None
 
-    to_insert = [
-        {
-            "received_at": row["received_at"],
-            "payment_date": row["received_at"],
-            "request_method": row["request_method"],
-            "remote_addr": row["remote_addr"],
-            "user_agent": row["user_agent"],
-            "authorization_header": row["authorization_header"],
-            "content_type": row["content_type"],
-            "event_type": normalize_event_type(row["event_type"]),
-            "status": normalize_status(row["status_raw"]),
-            "status_raw": row["status_raw"],
-            "transaction_id": row["transaction_id"],
-            "charge_id": row["charge_id"],
-            "store_id": row["store_id"],
-            "customer_id": row["customer_id"],
-            "amount": row["amount"],
-            "currency": row["currency"],
-            "livemode": row["livemode"],
-            "source": "RAW_MIGRATION",
-            "raw_json": row["raw_json"],
-        }
-        for row in rows
-    ]
-
-    with sqlite3.connect(dest_db_path) as dest_conn:
-        ensure_destination_schema(dest_conn)
-        dest_conn.executemany(
-            """
-            INSERT INTO webhook_events (
-                received_at,
-                payment_date,
-                request_method,
-                remote_addr,
-                user_agent,
-                authorization_header,
-                content_type,
-                event_type,
-                status,
-                status_raw,
-                transaction_id,
-                charge_id,
-                store_id,
-                customer_id,
-                amount,
-                currency,
-                livemode,
-                source,
-                raw_json
-            ) VALUES (
-                :received_at,
-                :payment_date,
-                :request_method,
-                :remote_addr,
-                :user_agent,
-                :authorization_header,
-                :content_type,
-                :event_type,
-                :status,
-                :status_raw,
-                :transaction_id,
-                :charge_id,
-                :store_id,
-                :customer_id,
-                :amount,
-                :currency,
-                :livemode,
-                :source,
-                :raw_json
+            conn.execute(
+                """
+                INSERT INTO payment_facts (
+                    source, source_event_id, occurred_at_jst, payment_date_jst,
+                    event_type_norm, status_norm, status_raw, transaction_id,
+                    charge_id, store_id, customer_ref, amount, currency, livemode,
+                    payer_name, email, raw_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source, source_event_id) DO UPDATE SET
+                    occurred_at_jst=excluded.occurred_at_jst,
+                    payment_date_jst=excluded.payment_date_jst,
+                    event_type_norm=excluded.event_type_norm,
+                    status_norm=excluded.status_norm,
+                    status_raw=excluded.status_raw,
+                    transaction_id=excluded.transaction_id,
+                    charge_id=excluded.charge_id,
+                    store_id=excluded.store_id,
+                    customer_ref=excluded.customer_ref,
+                    amount=excluded.amount,
+                    currency=excluded.currency,
+                    livemode=excluded.livemode,
+                    payer_name=excluded.payer_name,
+                    email=excluded.email,
+                    raw_json=excluded.raw_json,
+                    updated_at=excluded.updated_at
+                """,
+                (
+                    "WEBHOOK",
+                    row["id"],
+                    to_jst(occurred),
+                    to_jst(occurred),
+                    normalize_event(row["event_type_raw"]),
+                    normalize_status(row["status_raw"]),
+                    row["status_raw"],
+                    row["transaction_id"],
+                    row["charge_id"],
+                    row["store_id"],
+                    row["customer_ref"],
+                    amount,
+                    row["currency_raw"],
+                    1 if str(row["livemode_raw"] or "").lower() in {"1", "true", "live", "本番"} else 0,
+                    payer_name,
+                    email,
+                    row["payload_json"],
+                    now,
+                    now,
+                ),
             )
-            """,
-            to_insert,
-        )
-        dest_conn.commit()
+            inserted += 1
 
-    print(f"移植完了: {len(to_insert)} 件")
+        conn.commit()
+        print(f"反映件数: {inserted}")
     return 0
 
 

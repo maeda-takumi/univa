@@ -116,7 +116,10 @@ function extract_display_data(array $row): array
         $payload['入金日'] ?? null,
         $payload['イベント作成日時'] ?? null,
         $payload['課金作成日時'] ?? null,
+        get_nested_value($payload, ['data', 'captured_on']),
+        get_nested_value($payload, ['data', 'paid_on']),
         get_nested_value($payload, ['data', 'created_on']),
+        get_nested_value($payload, ['created_on']),
     ]);
 
     $paymentAmount = first_non_empty_value([
@@ -349,7 +352,10 @@ if ($dbExists) {
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), '')";
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.\\\"イベント作成日時\\\"'), '')";
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.\\\"課金作成日時\\\"'), '')";
+        $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.data.captured_on'), '')";
+        $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.data.paid_on'), '')";
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.data.created_on'), '')";
+        $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.created_on'), '')";
         $paymentDateExpression = 'date(COALESCE(' . implode(', ', $paymentDateSources) . '))';
 
         if ($filters['payment_date_from'] !== '') {

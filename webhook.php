@@ -1,21 +1,10 @@
 <?php
-// Univapay Webhook Receiver
-// Save this file as webhook.php on your server.
-// It receives webhook POSTs and stores them in SQLite.
-
 declare(strict_types=1);
 
-// =========================
-// Basic settings
-// =========================
 const DB_DIR = __DIR__ . '/data';
 const DB_FILE = DB_DIR . '/univapay_webhook.sqlite';
-const RAW_DB_FILE = DB_DIR . '/univapay_webhook_raw.sqlite';
 const LOG_FILE = DB_DIR . '/univapay_webhook_error.log';
 
-// Optional shared secret check.
-// If you set a value here, the request must include the same value
-// in the Authorization header.
 const EXPECTED_AUTHORIZATION = '';
 
 // =========================
@@ -29,25 +18,6 @@ function send_json(int $statusCode, array $data): void
     exit;
 }
 
-function get_request_headers_case_insensitive(): array
-{
-    $headers = [];
-
-    foreach ($_SERVER as $key => $value) {
-        if (strpos($key, 'HTTP_') === 0) {
-            $name = str_replace('_', '-', strtolower(substr($key, 5)));
-            $headers[$name] = $value;
-        }
-    }
-
-    if (function_exists('getallheaders')) {
-        foreach (getallheaders() as $name => $value) {
-            $headers[strtolower($name)] = $value;
-        }
-    }
-
-    return $headers;
-}
 
 function ensure_data_dir_exists(string $dir): void
 {
@@ -56,133 +26,28 @@ function ensure_data_dir_exists(string $dir): void
     }
 }
 
-function get_pdo(): PDO
+function write_error_log(string $message): void
 {
     ensure_data_dir_exists(DB_DIR);
 
-    $pdo = new PDO('sqlite:' . DB_FILE);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-
-    $pdo->exec(
-        'CREATE TABLE IF NOT EXISTS webhook_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            received_at TEXT NOT NULL,
-            payment_date TEXT,
-            request_method TEXT,
-            remote_addr TEXT,
-            user_agent TEXT,
-            authorization_header TEXT,
-            content_type TEXT,
-            event_type TEXT,
-            status TEXT,
-            status_raw TEXT,
-            transaction_id TEXT,
-            charge_id TEXT,
-            store_id TEXT,
-            customer_id TEXT,
-            amount INTEGER,
-            currency TEXT,
-            livemode INTEGER,
-            raw_json TEXT NOT NULL
-        )'
-    );
-
-    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webhook_events_received_at ON webhook_events(received_at)');
-    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webhook_events_event_type ON webhook_events(event_type)');
-    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webhook_events_transaction_id ON webhook_events(transaction_id)');
-
-    $columns = $pdo->query('PRAGMA table_info(webhook_events)')->fetchAll();
-    $hasStatusRaw = false;
-    foreach ($columns as $column) {
-        if (($column['name'] ?? null) === 'status_raw') {
-            $hasStatusRaw = true;
-            break;
-        }
-    }
-    if (!$hasStatusRaw) {
-        $pdo->exec('ALTER TABLE webhook_events ADD COLUMN status_raw TEXT');
-        $pdo->exec("UPDATE webhook_events SET status_raw = status WHERE status_raw IS NULL");
-    }
-    $hasSource = false;
-    foreach ($columns as $column) {
-        if (($column['name'] ?? null) === 'source') {
-            $hasSource = true;
-            break;
-        }
-    }
-    if (!$hasSource) {
-        $pdo->exec("ALTER TABLE webhook_events ADD COLUMN source TEXT NOT NULL DEFAULT 'WEBHOOK'");
-    }
-    $hasPaymentDate = false;
-    foreach ($columns as $column) {
-        if (($column['name'] ?? null) === 'payment_date') {
-            $hasPaymentDate = true;
-            break;
-        }
-    }
-    if (!$hasPaymentDate) {
-        $pdo->exec('ALTER TABLE webhook_events ADD COLUMN payment_date TEXT');
-        $pdo->exec("UPDATE webhook_events SET payment_date = received_at WHERE payment_date IS NULL OR TRIM(payment_date) = ''");
-    }
-
-    return $pdo;
+    file_put_contents(LOG_FILE, '[' . date('Y-m-d H:i:s') . '] ' . $message . PHP_EOL, FILE_APPEND);
 }
 
-function get_raw_pdo(): PDO
+function get_request_headers_case_insensitive(): array
 {
-    ensure_data_dir_exists(DB_DIR);
-
-    $pdo = new PDO('sqlite:' . RAW_DB_FILE);
-    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-
-    $pdo->exec(
-        'CREATE TABLE IF NOT EXISTS webhook_raw_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            received_at TEXT NOT NULL,
-            request_method TEXT,
-            remote_addr TEXT,
-            user_agent TEXT,
-            authorization_header TEXT,
-            content_type TEXT,
-            event_type TEXT,
-            status_raw TEXT,
-            transaction_id TEXT,
-            charge_id TEXT,
-            store_id TEXT,
-            customer_id TEXT,
-            amount INTEGER,
-            currency TEXT,
-            livemode INTEGER,
-            raw_json TEXT NOT NULL
-        )'
-    );
-
-    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webhook_raw_events_received_at ON webhook_raw_events(received_at)');
-    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webhook_raw_events_event_type ON webhook_raw_events(event_type)');
-    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webhook_raw_events_transaction_id ON webhook_raw_events(transaction_id)');
-    return $pdo;
-}
-
-function first_non_empty(array $values): ?string
-{
-    foreach ($values as $value) {
-        if ($value !== null && $value !== '') {
-            return (string)$value;
+    $headers = [];
+    foreach ($_SERVER as $key => $value) {
+        if (strpos($key, 'HTTP_') === 0) {
+            $name = str_replace('_', '-', strtolower(substr($key, 5)));
+            $headers[$name] = $value;
         }
     }
-    return null;
-}
-
-function first_non_empty_int(array $values): ?int
-{
-    foreach ($values as $value) {
-        if ($value !== null && $value !== '' && is_numeric($value)) {
-            return (int)$value;
+    if (function_exists('getallheaders')) {
+        foreach (getallheaders() as $name => $value) {
+            $headers[strtolower((string)$name)] = $value;
         }
     }
-    return null;
+    return $headers;
 }
 
 function get_nested(array $source, array $path)
@@ -197,79 +62,56 @@ function get_nested(array $source, array $path)
     return $current;
 }
 
-function write_error_log(string $message): void
+function first_non_empty(array $values): ?string
 {
-    ensure_data_dir_exists(DB_DIR);
-    $line = '[' . date('Y-m-d H:i:s') . '] ' . $message . PHP_EOL;
-    file_put_contents(LOG_FILE, $line, FILE_APPEND);
+    foreach ($values as $value) {
+        if ($value !== null && trim((string)$value) !== '') {
+            return trim((string)$value);
+        }
+    }
+    return null;
 }
-
-function translate_status_to_japanese(?string $statusRaw): ?string
+function normalize_status(?string $raw): ?string
 {
-    if ($statusRaw === null) {
+    if ($raw === null) {
         return null;
     }
 
-    $normalized = strtolower(trim($statusRaw));
+    $normalized = strtolower(trim($raw));
     if ($normalized === '') {
         return null;
     }
 
-    if (
-        str_contains($normalized, 'success') ||
-        str_contains($normalized, 'succeeded') ||
-        str_contains($normalized, 'completed') ||
-        str_contains($normalized, 'paid') ||
-        str_contains($normalized, 'captured') ||
-        str_contains($normalized, 'approved')
-    ) {
+    if (preg_match('/success|succeeded|completed|paid|captured|approved|成功|完了/u', $normalized) === 1) {
         return '成功';
     }
 
-    if (
-        str_contains($normalized, 'pending') ||
-        str_contains($normalized, 'processing') ||
-        str_contains($normalized, 'in_progress') ||
-        str_contains($normalized, 'authorized') ||
-        str_contains($normalized, 'awaiting')
-    ) {
+    if (preg_match('/pending|processing|in_progress|authorized|awaiting|処理中|保留/u', $normalized) === 1) {
         return '処理中';
     }
 
-    if (
-        str_contains($normalized, 'refund') ||
-        str_contains($normalized, 'chargeback') ||
-        str_contains($normalized, 'reversed')
-    ) {
+    if (preg_match('/refund|chargeback|reversed|返金|取消/u', $normalized) === 1) {
         return '返金/取消';
     }
 
-    if (
-        str_contains($normalized, 'fail') ||
-        str_contains($normalized, 'cancel') ||
-        str_contains($normalized, 'error') ||
-        str_contains($normalized, 'expired') ||
-        str_contains($normalized, 'declined') ||
-        str_contains($normalized, 'voided')
-    ) {
+    if (preg_match('/fail|cancel|error|expired|declined|voided|失敗|エラー|キャンセル/u', $normalized) === 1) {
         return '失敗';
     }
 
-    return $statusRaw;
+    return $raw;
 }
-function translate_event_to_japanese(?string $eventRaw): ?string
+function normalize_event(?string $raw): ?string
 {
-    if ($eventRaw === null) {
+    if ($raw === null) {
         return null;
     }
 
-    $normalized = strtolower(trim($eventRaw));
+    $normalized = strtolower(trim($raw));
     if ($normalized === '') {
         return null;
     }
 
-    // migrate_univapay_raw_to_webhook.py の normalize_event_type と同じ変換ロジック。
-    $directMappings = [
+    $direct = [
         'charge_finished' => '売上',
         'charge_pending' => '処理待ち',
         'charge_canceled' => 'キャンセル',
@@ -279,8 +121,8 @@ function translate_event_to_japanese(?string $eventRaw): ?string
         'token_created' => 'リカーリングトークン発行',
         'token_three_ds_updated' => '3-Dセキュア認証',
     ];
-    if (array_key_exists($normalized, $directMappings)) {
-        return $directMappings[$normalized];
+    if (array_key_exists($normalized, $direct)) {
+        return $direct[$normalized];
     }
 
     $keywordMappings = [
@@ -302,84 +144,161 @@ function translate_event_to_japanese(?string $eventRaw): ?string
         }
     }
 
-    return $eventRaw;
+    return $raw;
 }
 
-function to_jst_datetime_string(?string $value): ?string
+function to_jst_datetime_string(?string $value): string
 {
-    if ($value === null) {
-        return null;
-    }
-
-    $text = trim($value);
-    if ($text === '') {
-        return null;
-    }
 
     $jst = new DateTimeZone('Asia/Tokyo');
-    $formats = [
-        'Y/m/d H:i:s',
-        'Y-m-d H:i:s',
-        DateTimeInterface::ATOM,
-    ];
+    if ($value === null || trim($value) === '') {
+        return (new DateTimeImmutable('now', $jst))->format('Y-m-d H:i:s');
+    }
 
+    $formats = ['Y/m/d H:i:s', 'Y-m-d H:i:s', DateTimeInterface::ATOM];
     foreach ($formats as $format) {
-        $parsed = DateTimeImmutable::createFromFormat($format, $text);
+        $parsed = DateTimeImmutable::createFromFormat($format, trim($value));
         if ($parsed instanceof DateTimeImmutable) {
             return $parsed->setTimezone($jst)->format('Y-m-d H:i:s');
         }
     }
 
     try {
-        return (new DateTimeImmutable($text))->setTimezone($jst)->format('Y-m-d H:i:s');
+        return (new DateTimeImmutable(trim($value)))->setTimezone($jst)->format('Y-m-d H:i:s');
     } catch (Throwable) {
-        return null;
+        return (new DateTimeImmutable('now', $jst))->format('Y-m-d H:i:s');
     }
 }
-// =========================
-// Main
-// =========================
+function ensure_schema(PDO $pdo): void
+{
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS csv_raw_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            imported_at TEXT NOT NULL,
+            occurred_at_raw TEXT,
+            event_type_raw TEXT,
+            status_raw TEXT,
+            transaction_id TEXT,
+            charge_id TEXT,
+            store_id TEXT,
+            customer_ref TEXT,
+            amount_raw TEXT,
+            currency_raw TEXT,
+            livemode_raw TEXT,
+            raw_json TEXT NOT NULL
+        )"
+    );
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS webhook_raw_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            received_at TEXT NOT NULL,
+            request_method TEXT,
+            remote_addr TEXT,
+            user_agent TEXT,
+            authorization_header TEXT,
+            content_type TEXT,
+            event_type_raw TEXT,
+            status_raw TEXT,
+            transaction_id TEXT,
+            charge_id TEXT,
+            store_id TEXT,
+            customer_ref TEXT,
+            amount_raw TEXT,
+            currency_raw TEXT,
+            livemode_raw TEXT,
+            payload_json TEXT NOT NULL
+        )"
+    );
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS payment_facts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL CHECK(source IN ('CSV', 'WEBHOOK')),
+            source_event_id INTEGER NOT NULL,
+            occurred_at_jst TEXT NOT NULL,
+            payment_date_jst TEXT NOT NULL,
+            event_type_norm TEXT,
+            status_norm TEXT,
+            status_raw TEXT,
+            transaction_id TEXT,
+            charge_id TEXT,
+            store_id TEXT,
+            customer_ref TEXT,
+            amount INTEGER,
+            currency TEXT,
+            livemode INTEGER,
+            payer_name TEXT,
+            email TEXT,
+            raw_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(source, source_event_id)
+        )"
+    );
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_payment_facts_payment_date ON payment_facts(payment_date_jst)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_payment_facts_status ON payment_facts(status_norm)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_payment_facts_txid ON payment_facts(transaction_id)');
+
+    $pdo->exec('DROP TABLE IF EXISTS webhook_events');
+    $pdo->exec('DROP VIEW IF EXISTS webhook_events');
+    $pdo->exec(
+        "CREATE VIEW webhook_events AS
+        SELECT
+            id,
+            occurred_at_jst AS received_at,
+            payment_date_jst AS payment_date,
+            NULL AS request_method,
+            NULL AS remote_addr,
+            NULL AS user_agent,
+            NULL AS authorization_header,
+            NULL AS content_type,
+            event_type_norm AS event_type,
+            status_norm AS status,
+            status_raw,
+            transaction_id,
+            charge_id,
+            store_id,
+            customer_ref AS customer_id,
+            amount,
+            currency,
+            livemode,
+            source,
+            raw_json
+        FROM payment_facts"
+    );
+}
 try {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        send_json(405, [
-            'ok' => false,
-            'message' => 'POST only',
-        ]);
+        send_json(405, ['ok' => false, 'message' => 'POST only']);
     }
 
     $headers = get_request_headers_case_insensitive();
     $authorization = $headers['authorization'] ?? '';
 
     if (EXPECTED_AUTHORIZATION !== '' && $authorization !== EXPECTED_AUTHORIZATION) {
-        send_json(401, [
-            'ok' => false,
-            'message' => 'Unauthorized',
-        ]);
+        send_json(401, ['ok' => false, 'message' => 'Unauthorized']);
     }
 
     $rawBody = file_get_contents('php://input');
     if ($rawBody === false || trim($rawBody) === '') {
-        send_json(400, [
-            'ok' => false,
-            'message' => 'Empty body',
-        ]);
+        send_json(400, ['ok' => false, 'message' => 'Empty body']);
     }
 
     $payload = json_decode($rawBody, true);
     if (!is_array($payload)) {
-        send_json(400, [
-            'ok' => false,
-            'message' => 'Invalid JSON',
-        ]);
+        send_json(400, ['ok' => false, 'message' => 'Invalid JSON']);
     }
 
-    // Univapay payload shapes may vary by event.
-    // We store the raw JSON no matter what, and also try to extract common fields.
+    ensure_data_dir_exists(DB_DIR);
+    $pdo = new PDO('sqlite:' . DB_FILE);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    ensure_schema($pdo);
+
     $eventTypeRaw = first_non_empty([
         $payload['event'] ?? null,
         $payload['event_type'] ?? null,
         $payload['type'] ?? null,
-        get_nested($payload, ['data', 'event'])
+        get_nested($payload, ['data', 'event']),
     ]);
 
     $statusRaw = first_non_empty([
@@ -388,213 +307,168 @@ try {
         get_nested($payload, ['data', 'three_ds', 'status']),
         get_nested($payload, ['data', 'data', 'three_ds', 'status']),
         get_nested($payload, ['transaction', 'status']),
-        get_nested($payload, ['charge', 'status'])
+        get_nested($payload, ['charge', 'status']),
     ]);
-    $status = translate_status_to_japanese($statusRaw);
-
-    $eventType = translate_event_to_japanese($eventTypeRaw);
-
-    $paymentDateRaw = first_non_empty([
+    $occurredRaw = first_non_empty([
         $payload['入金日'] ?? null,
         $payload['イベント作成日時'] ?? null,
         $payload['課金作成日時'] ?? null,
         get_nested($payload, ['data', 'captured_on']),
         get_nested($payload, ['data', 'paid_on']),
         get_nested($payload, ['data', 'created_on']),
-        get_nested($payload, ['created_on'])
+        get_nested($payload, ['created_on']),
     ]);
     $transactionId = first_non_empty([
         $payload['transaction_id'] ?? null,
         $payload['id'] ?? null,
         get_nested($payload, ['data', 'transaction_id']),
         get_nested($payload, ['data', 'transaction_token_id']),
-        get_nested($payload, ['transaction', 'id'])
+        get_nested($payload, ['transaction', 'id']),
     ]);
 
     $chargeId = first_non_empty([
         $payload['charge_id'] ?? null,
         get_nested($payload, ['data', 'charge_id']),
         get_nested($payload, ['data', 'id']),
-        get_nested($payload, ['charge', 'id'])
+        get_nested($payload, ['charge', 'id']),
     ]);
 
     $storeId = first_non_empty([
         $payload['store_id'] ?? null,
         get_nested($payload, ['data', 'store_id']),
-        get_nested($payload, ['store', 'id'])
+        get_nested($payload, ['store', 'id']),
     ]);
 
-    $customerId = first_non_empty([
+    $customerRef = first_non_empty([
         $payload['customer_id'] ?? null,
         get_nested($payload, ['data', 'customer_id']),
         get_nested($payload, ['customer', 'id']),
         get_nested($payload, ['data', 'email']),
-        get_nested($payload, ['data', 'metadata', 'univapay-name']),
-        get_nested($payload, ['data', 'metadata', 'univapay-phone-number'])
     ]);
 
-    $amount = first_non_empty_int([
-        $payload['amount'] ?? null,
-        get_nested($payload, ['data', 'amount']),
-        get_nested($payload, ['data', 'charged_amount']),
-        get_nested($payload, ['data', 'requested_amount']),
-        get_nested($payload, ['transaction', 'amount']),
-        get_nested($payload, ['charge', 'amount'])
+    $amountRaw = first_non_empty([
+        (string)($payload['amount'] ?? ''),
+        (string)(get_nested($payload, ['data', 'amount']) ?? ''),
+        (string)(get_nested($payload, ['data', 'charged_amount']) ?? ''),
+        (string)(get_nested($payload, ['data', 'requested_amount']) ?? ''),
     ]);
+    $amount = null;
+    if ($amountRaw !== null && is_numeric($amountRaw)) {
+        $amount = (int)$amountRaw;
+    }
 
     $currency = first_non_empty([
         $payload['currency'] ?? null,
         get_nested($payload, ['data', 'currency']),
         get_nested($payload, ['data', 'charged_currency']),
         get_nested($payload, ['data', 'requested_currency']),
-        get_nested($payload, ['transaction', 'currency']),
-        get_nested($payload, ['charge', 'currency'])
     ]);
 
-    $livemodeRaw = $payload['livemode']
-        ?? get_nested($payload, ['data', 'livemode'])
-        ?? null;
-    $livemode = is_bool($livemodeRaw) ? ($livemodeRaw ? 1 : 0) : null;
+    $livemodeRaw = first_non_empty([
+        is_bool($payload['livemode'] ?? null) ? (($payload['livemode'] ?? false) ? '1' : '0') : ($payload['livemode'] ?? null),
+        get_nested($payload, ['data', 'livemode']),
+    ]);
 
-    $receivedAt = date('Y-m-d H:i:s');
-    $paymentDate = to_jst_datetime_string($paymentDateRaw) ?? to_jst_datetime_string($receivedAt) ?? $receivedAt;
-    $commonInsertParams = [
+    $receivedAt = (new DateTimeImmutable('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s');
+    $now = (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d H:i:s');
+
+    $rawStmt = $pdo->prepare(
+        'INSERT INTO webhook_raw_events (
+            received_at, request_method, remote_addr, user_agent, authorization_header,
+            content_type, event_type_raw, status_raw, transaction_id, charge_id,
+            store_id, customer_ref, amount_raw, currency_raw, livemode_raw, payload_json
+        ) VALUES (
+            :received_at, :request_method, :remote_addr, :user_agent, :authorization_header,
+            :content_type, :event_type_raw, :status_raw, :transaction_id, :charge_id,
+            :store_id, :customer_ref, :amount_raw, :currency_raw, :livemode_raw, :payload_json
+        )'
+    );
+
+    $rawStmt->execute([
         ':received_at' => $receivedAt,
-        ':payment_date' => $paymentDate,
         ':request_method' => $_SERVER['REQUEST_METHOD'] ?? null,
         ':remote_addr' => $_SERVER['REMOTE_ADDR'] ?? null,
         ':user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
         ':authorization_header' => $authorization !== '' ? $authorization : null,
         ':content_type' => $_SERVER['CONTENT_TYPE'] ?? null,
-        ':event_type' => $eventTypeRaw,
+        ':event_type_raw' => $eventTypeRaw,
         ':status_raw' => $statusRaw,
         ':transaction_id' => $transactionId,
         ':charge_id' => $chargeId,
         ':store_id' => $storeId,
-        ':customer_id' => $customerId,
+        ':customer_ref' => $customerRef,
+        ':amount_raw' => $amountRaw,
+        ':currency_raw' => $currency,
+        ':livemode_raw' => $livemodeRaw,
+        ':payload_json' => $rawBody,
+    ]);
+
+    $sourceEventId = (int)$pdo->lastInsertId();
+    $payerName = first_non_empty([
+        $payload['入金者名'] ?? null,
+        $payload['氏名'] ?? null,
+        $payload['カード名義'] ?? null,
+        get_nested($payload, ['data', 'metadata', 'univapay-name']),
+        get_nested($payload, ['data', 'metadata', 'name']),
+    ]);
+    $email = first_non_empty([
+        $payload['メールアドレス'] ?? null,
+        get_nested($payload, ['data', 'email']),
+        get_nested($payload, ['customer', 'email']),
+    ]);
+
+    $factStmt = $pdo->prepare(
+        'INSERT INTO payment_facts (
+            source, source_event_id, occurred_at_jst, payment_date_jst, event_type_norm,
+            status_norm, status_raw, transaction_id, charge_id, store_id, customer_ref,
+            amount, currency, livemode, payer_name, email, raw_json, created_at, updated_at
+        ) VALUES (
+            :source, :source_event_id, :occurred_at_jst, :payment_date_jst, :event_type_norm,
+            :status_norm, :status_raw, :transaction_id, :charge_id, :store_id, :customer_ref,
+            :amount, :currency, :livemode, :payer_name, :email, :raw_json, :created_at, :updated_at
+        ) ON CONFLICT(source, source_event_id) DO UPDATE SET
+            occurred_at_jst=excluded.occurred_at_jst,
+            payment_date_jst=excluded.payment_date_jst,
+            event_type_norm=excluded.event_type_norm,
+            status_norm=excluded.status_norm,
+            status_raw=excluded.status_raw,
+            transaction_id=excluded.transaction_id,
+            charge_id=excluded.charge_id,
+            store_id=excluded.store_id,
+            customer_ref=excluded.customer_ref,
+            amount=excluded.amount,
+            currency=excluded.currency,
+            livemode=excluded.livemode,
+            payer_name=excluded.payer_name,
+            email=excluded.email,
+            raw_json=excluded.raw_json,
+            updated_at=excluded.updated_at'
+    );
+
+    $factStmt->execute([
+        ':source' => 'WEBHOOK',
+        ':source_event_id' => $sourceEventId,
+        ':occurred_at_jst' => to_jst_datetime_string($occurredRaw ?? $receivedAt),
+        ':payment_date_jst' => to_jst_datetime_string($occurredRaw ?? $receivedAt),
+        ':event_type_norm' => normalize_event($eventTypeRaw),
+        ':status_norm' => normalize_status($statusRaw),
+        ':status_raw' => $statusRaw,
+        ':transaction_id' => $transactionId,
+        ':charge_id' => $chargeId,
+        ':store_id' => $storeId,
+        ':customer_ref' => $customerRef,
         ':amount' => $amount,
         ':currency' => $currency,
-        ':livemode' => $livemode,
+        ':livemode' => in_array(strtolower((string)$livemodeRaw), ['1', 'true', 'live', '本番'], true) ? 1 : 0,
+        ':payer_name' => $payerName,
+        ':email' => $email,
         ':raw_json' => $rawBody,
-    ];
-    $rawInsertParams = $commonInsertParams;
-    unset($rawInsertParams[':payment_date']);
-
-    $rawPdo = get_raw_pdo();
-    $rawStmt = $rawPdo->prepare(
-        'INSERT INTO webhook_raw_events (
-            received_at,
-            request_method,
-            remote_addr,
-            user_agent,
-            authorization_header,
-            content_type,
-            event_type,
-            status_raw,
-            transaction_id,
-            charge_id,
-            store_id,
-            customer_id,
-            amount,
-            currency,
-            livemode,
-            raw_json
-        ) VALUES (
-            :received_at,
-            :request_method,
-            :remote_addr,
-            :user_agent,
-            :authorization_header,
-            :content_type,
-            :event_type,
-            :status_raw,
-            :transaction_id,
-            :charge_id,
-            :store_id,
-            :customer_id,
-            :amount,
-            :currency,
-            :livemode,
-            :raw_json
-        )'
-    );
-    $rawStmt->execute($rawInsertParams);
-    $pdo = get_pdo();
-
-    $stmt = $pdo->prepare(
-        'INSERT INTO webhook_events (
-            received_at,
-            payment_date,
-            request_method,
-            remote_addr,
-            user_agent,
-            authorization_header,
-            content_type,
-            event_type,
-            status,
-            status_raw,
-            transaction_id,
-            charge_id,
-            store_id,
-            customer_id,
-            amount,
-            currency,
-            livemode,
-            source,
-            raw_json
-        ) VALUES (
-            :received_at,
-            :payment_date,
-            :request_method,
-            :remote_addr,
-            :user_agent,
-            :authorization_header,
-            :content_type,
-            :event_type,
-            :status,
-            :status_raw,
-            :transaction_id,
-            :charge_id,
-            :store_id,
-            :customer_id,
-            :amount,
-            :currency,
-            :livemode,
-            :source,
-            :raw_json
-        )'
-    );
-
-    $stmt->execute([
-        ':received_at' => $commonInsertParams[':received_at'],
-        ':payment_date' => $commonInsertParams[':payment_date'],
-        ':request_method' => $commonInsertParams[':request_method'],
-        ':remote_addr' => $commonInsertParams[':remote_addr'],
-        ':user_agent' => $commonInsertParams[':user_agent'],
-        ':authorization_header' => $commonInsertParams[':authorization_header'],
-        ':content_type' => $commonInsertParams[':content_type'],
-        ':event_type' => $eventType,
-        ':status' => $status,
-        ':status_raw' => $commonInsertParams[':status_raw'],
-        ':transaction_id' => $commonInsertParams[':transaction_id'],
-        ':charge_id' => $commonInsertParams[':charge_id'],
-        ':store_id' => $commonInsertParams[':store_id'],
-        ':customer_id' => $commonInsertParams[':customer_id'],
-        ':amount' => $commonInsertParams[':amount'],
-        ':currency' => $commonInsertParams[':currency'],
-        ':livemode' => $commonInsertParams[':livemode'],
-        ':source' => 'WEBHOOK',
-        ':raw_json' => $commonInsertParams[':raw_json'],
+        ':created_at' => $now,
+        ':updated_at' => $now,
     ]);
 
-    send_json(200, [
-        'ok' => true,
-        'message' => 'Webhook received and saved.',
-    ]);
+    send_json(200, ['ok' => true, 'message' => 'Webhook received and normalized.']);
 } catch (Throwable $e) {
     write_error_log($e->getMessage());
-    send_json(500, [
-        'ok' => false,
-        'message' => 'Internal Server Error',
-    ]);
+    send_json(500, ['ok' => false, 'message' => 'Internal Server Error']);
 }
