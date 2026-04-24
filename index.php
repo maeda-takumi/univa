@@ -155,6 +155,7 @@ function extract_display_data(array $row): array
         'payment_amount' => $paymentAmount ?? '',
         'payer_name' => $payerName ?? '',
         'email' => $email ?? '',
+        'event_type' => trim((string)($row['event_type'] ?? '')),
         'status' => trim((string)($row['status'] ?? '')),
     ];
 }
@@ -254,7 +255,8 @@ $filters = [
     'payment_date_to' => trim((string)($_GET['payment_date_to'] ?? '')),
     'payer_name' => trim((string)($_GET['payer_name'] ?? '')),
     'email' => trim((string)($_GET['email'] ?? '')),
-    'status' => trim((string)($_GET['status'] ?? '')),
+    'event_type' => trim((string)($_GET['event_type'] ?? '売上')),
+    'status' => trim((string)($_GET['status'] ?? '成功')),
 ];
 $page = max(1, (int)($_GET['page'] ?? 1));
 
@@ -267,6 +269,7 @@ $infoMessage = '';
 $summaryCount = 0;
 $summaryAmount = 0;
 $statusOptions = [];
+$eventTypeOptions = [];
 
 if ($dbExists) {
     try {
@@ -276,6 +279,9 @@ if ($dbExists) {
 
         $statusStmt = $pdo->query("SELECT DISTINCT TRIM(status) AS status_value FROM webhook_events WHERE TRIM(IFNULL(status, '')) <> '' ORDER BY status_value ASC");
         $statusOptions = array_values(array_filter(array_map(static fn(array $row): string => (string)($row['status_value'] ?? ''), $statusStmt->fetchAll()), static fn(string $value): bool => $value !== ''));
+
+        $eventTypeStmt = $pdo->query("SELECT DISTINCT TRIM(event_type) AS event_type_value FROM webhook_events WHERE TRIM(IFNULL(event_type, '')) <> '' ORDER BY event_type_value ASC");
+        $eventTypeOptions = array_values(array_filter(array_map(static fn(array $row): string => (string)($row['event_type_value'] ?? ''), $eventTypeStmt->fetchAll()), static fn(string $value): bool => $value !== ''));
 
         $whereConditions = ["TRIM(IFNULL(status, '')) <> ''"];
         $params = [];
@@ -296,6 +302,10 @@ if ($dbExists) {
         if ($filters['email'] !== '') {
             $whereConditions[] = "raw_json LIKE :email";
             $params[':email'] = '%' . $filters['email'] . '%';
+        }
+        if ($filters['event_type'] !== '') {
+            $whereConditions[] = "event_type = :event_type";
+            $params[':event_type'] = $filters['event_type'];
         }
         if ($filters['status'] !== '') {
             $whereConditions[] = "status = :status";
@@ -399,6 +409,15 @@ require __DIR__ . '/header.php';
                     <?php endforeach; ?>
                 </select>
             </div>
+            <div class="search-group">
+                <label for="event_type">イベント</label>
+                <select id="event_type" name="event_type">
+                    <option value="">すべて</option>
+                    <?php foreach ($eventTypeOptions as $eventTypeOption): ?>
+                        <option value="<?= h($eventTypeOption) ?>" <?= $eventTypeOption === $filters['event_type'] ? 'selected' : '' ?>><?= h($eventTypeOption) ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
         </div>
         <div class="search-actions">
             <button type="submit" class="btn btn-primary">検索</button>
@@ -439,7 +458,7 @@ require __DIR__ . '/header.php';
     <div class="table-header">
         <div>
             <h3>一覧表示</h3>
-            <p>入金日 / 入金額 / 入金者名 / メールアドレス / ステータス（最大25件ずつ）</p>
+            <p>入金日 / 入金額 / 入金者名 / メールアドレス / イベント / ステータス（最大25件ずつ）</p>
         </div>
         <div class="table-meta">
             <span>ページ <?= h((string)$page) ?> / <?= h((string)$totalPages) ?></span>
@@ -454,6 +473,7 @@ require __DIR__ . '/header.php';
                     <th>入金額</th>
                     <th>入金者名</th>
                     <th>メールアドレス</th>
+                    <th>イベント</th>
                     <th>ステータス</th>
                 </tr>
             </thead>
@@ -466,6 +486,7 @@ require __DIR__ . '/header.php';
                             <td><?= h(format_jpy_amount($display['payment_amount'])) ?></td>
                             <td><?= h((string)$display['payer_name']) ?></td>
                             <td><?= h((string)$display['email']) ?></td>
+                            <td><?= h((string)$display['event_type']) ?></td>
                             <td>
                                 <span class="status-badge <?= h(status_badge_class((string)$display['status'])) ?>">
                                     <?= h((string)$display['status']) ?>
@@ -475,7 +496,7 @@ require __DIR__ . '/header.php';
                     <?php endforeach; ?>
                 <?php else: ?>
                     <tr>
-                        <td colspan="5" class="empty-cell">表示するデータがありません。</td>
+                        <td colspan="6" class="empty-cell">表示するデータがありません。</td>
                     </tr>
                 <?php endif; ?>
             </tbody>
