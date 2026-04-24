@@ -74,17 +74,32 @@ def normalize_event_type(event_type: str | None) -> str | None:
     if not normalized:
         return None
 
+    # CSV 取り込み時の event_type（例: 売上 / 処理待ち / リカーリングトークン発行）に寄せる。
+    # まずは webhook の代表的なイベント名を明示的にマップし、
+    # その後にキーワードベースでフォールバックする。
+    direct_mappings = {
+        "charge_finished": "売上",
+        "charge_pending": "処理待ち",
+        "charge_canceled": "キャンセル",
+        "charge_cancelled": "キャンセル",
+        "charge_refunded": "赤伝返金",
+        "chargeback_created": "チャージバック",
+        "token_created": "リカーリングトークン発行",
+        "token_three_ds_updated": "3-Dセキュア認証",
+    }
+    if normalized in direct_mappings:
+        return direct_mappings[normalized]
+    
     keyword_mappings = [
-        (("payment", "charge"), "決済"),
-        (("capture",), "売上確定"),
-        (("authorize", "authorise"), "与信確保"),
-        (("cancel", "canceled", "cancelled", "void"), "取消"),
-        (("refund",), "返金"),
-        (("failed", "failure", "error", "decline"), "失敗"),
-        (("pending", "processing"), "処理中"),
-        (("subscription",), "サブスクリプション"),
-        (("customer",), "顧客"),
-        (("token",), "トークン"),
+        (("three_ds", "3ds"), "3-Dセキュア認証"),
+        (("token",), "リカーリングトークン発行"),
+        (("chargeback",), "チャージバック"),
+        (("refund",), "赤伝返金"),
+        (("cancel", "canceled", "cancelled", "void"), "キャンセル"),
+        (("pending", "processing"), "処理待ち"),
+        (("failed", "failure", "error", "decline"), "売上失敗"),
+        (("payment", "charge", "capture"), "売上"),
+
     ]
 
     for keywords, jp in keyword_mappings:
