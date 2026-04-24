@@ -261,6 +261,23 @@ function build_page_url(int $page, array $queryParams): string
     return '?' . http_build_query($params);
 }
 
+function build_index_filter_query_params(array $filters, int $page): array
+{
+    $params = [];
+    foreach ($filters as $key => $value) {
+        if ($value === '') {
+            continue;
+        }
+        $params[$key] = $value;
+    }
+
+    if ($page > 1) {
+        $params['page'] = $page;
+    }
+
+    return $params;
+}
+
 $filters = [
     'payment_date_from' => trim((string)($_GET['payment_date_from'] ?? '')),
     'payment_date_to' => trim((string)($_GET['payment_date_to'] ?? '')),
@@ -271,6 +288,11 @@ $filters = [
 ];
 $page = max(1, (int)($_GET['page'] ?? 1));
 $currentQuery = $_GET;
+$preservedIndexQueryParams = build_index_filter_query_params($filters, $page);
+$calcLink = 'calc.php';
+if (!empty($preservedIndexQueryParams)) {
+    $calcLink .= '?' . http_build_query($preservedIndexQueryParams);
+}
 
 $dbExists = file_exists(DB_FILE);
 $rows = [];
@@ -404,8 +426,8 @@ require __DIR__ . '/header.php';
         </a>
     </div>
     <nav aria-label="サイドバー">
-        <a class="sidebar-link" href="calc.php">日別・月別集計</a>
-        <a class="sidebar-link" href="calc.php">入金集計カード</a>
+        <a class="sidebar-link" href="<?= h($calcLink) ?>">日別・月別集計</a>
+        <a class="sidebar-link" href="<?= h($calcLink) ?>">入金集計カード</a>
     </nav>
 </aside>
 <button type="button" class="sidebar-overlay" id="sidebarOverlay" aria-label="サイドバーを閉じる"></button>
