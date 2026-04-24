@@ -162,26 +162,26 @@ def normalize_event(raw: str | None) -> str | None:
     if not n:
         return None
     direct = {
-        "charge_finished": "決済処理完了",
-        "charge_pending": "決済処理待ち",
+        "charge_finished": "売上",
+        "charge_pending": "処理待ち",
         "charge_canceled": "キャンセル",
         "charge_cancelled": "キャンセル",
-        "charge_refunded": "返金処理完了",
+        "charge_refunded": "赤伝返金",
         "chargeback_created": "チャージバック",
-        "token_created": "トークン作成",
-        "token_three_ds_updated": "3Dセキュア状態更新",
+        "token_created": "リカーリングトークン発行",
+        "token_three_ds_updated": "3-Dセキュア認証",
     }
     if n in direct:
         return direct[n]
     mapping = [
-        (("three_ds", "3ds"), "3Dセキュア状態更新"),
-        (("token",), "トークン作成/更新"),
+        (("three_ds", "3ds"), "3-Dセキュア認証"),
+        (("token",), "リカーリングトークン発行"),
         (("chargeback",), "チャージバック"),
-        (("refund",), "返金処理完了"),
+        (("refund",), "赤伝返金"),
         (("cancel", "canceled", "cancelled", "void"), "キャンセル"),
         (("pending", "processing"), "処理待ち"),
-        (("failed", "failure", "error", "decline"), "失敗"),
-        (("payment", "charge", "capture", "売上"), "決済処理完了"),
+        (("failed", "failure", "error", "decline"), "売上失敗"),
+        (("payment", "charge", "capture", "売上"), "売上"),
     ]
     for keywords, out in mapping:
         if any(k in n for k in keywords):
@@ -249,7 +249,7 @@ def main() -> int:
         for row in rows:
             event_type_raw = (row.get("イベント") or "").strip() or None
             status_raw = (row.get("課金ステータス") or row.get("返金ステータス") or "").strip() or None
-            occurred_raw = (row.get("イベント作成日時") or row.get("課金作成日時") or "").strip() or None
+            occurred_raw = (row.get("課金作成日時") or row.get("イベント作成日時") or "").strip() or None
             amount_raw = (row.get("イベント金額") or row.get("課金金額") or "").strip() or None
             currency_raw = (row.get("イベント通貨") or row.get("課金通貨") or row.get("返金通貨") or "").strip() or None
 

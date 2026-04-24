@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 session_start();
 
-$pageTitle = '入金データ一覧';
+$pageTitle = '入金情報一覧';
 
 const DB_FILE = __DIR__ . '/data/univapay_webhook.sqlite';
 const PER_PAGE = 25;
@@ -356,7 +356,11 @@ if ($dbExists) {
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.data.paid_on'), '')";
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.data.created_on'), '')";
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.created_on'), '')";
-        $paymentDateExpression = 'date(COALESCE(' . implode(', ', $paymentDateSources) . '))';
+        $paymentDateCoalesce = 'COALESCE(' . implode(', ', $paymentDateSources) . ')';
+        $paymentDateExpression = 'date(' . $paymentDateCoalesce . ')';
+        $paymentDateOrderExpression = $hasPaymentDateColumn
+            ? "datetime(COALESCE(NULLIF(payment_date, ''), {$paymentDateCoalesce}, received_at))"
+            : "datetime(COALESCE({$paymentDateCoalesce}, received_at))";
 
         if ($filters['payment_date_from'] !== '') {
             $whereConditions[] = "{$paymentDateExpression} >= :payment_date_from";
@@ -413,7 +417,7 @@ if ($dbExists) {
                     status
                 FROM webhook_events
                 {$whereSql}
-                ORDER BY datetime(received_at) DESC, id DESC
+                ORDER BY {$paymentDateOrderExpression} DESC, id DESC
                 LIMIT :limit OFFSET :offset";
 
         $stmt = $pdo->prepare($sql);
