@@ -477,6 +477,8 @@ try {
         ':livemode' => $livemode,
         ':raw_json' => $rawBody,
     ];
+    $rawInsertParams = $commonInsertParams;
+    unset($rawInsertParams[':payment_date']);
 
     $rawPdo = get_raw_pdo();
     $rawStmt = $rawPdo->prepare(
@@ -516,7 +518,7 @@ try {
             :raw_json
         )'
     );
-    $rawStmt->execute($commonInsertParams);
+    $rawStmt->execute($rawInsertParams);
     $pdo = get_pdo();
 
     $stmt = $pdo->prepare(
