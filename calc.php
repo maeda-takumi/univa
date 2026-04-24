@@ -36,6 +36,37 @@ function first_non_empty_value(array $values): ?string
     return null;
 }
 
+function format_display_datetime(?string $value): string
+{
+    if ($value === null) {
+        return '';
+    }
+
+    $text = trim($value);
+    if ($text === '') {
+        return '';
+    }
+
+    $formats = [
+        'Y/m/d H:i:s',
+        'Y-m-d H:i:s',
+        DateTimeInterface::ATOM,
+    ];
+
+    foreach ($formats as $format) {
+        $date = DateTimeImmutable::createFromFormat($format, $text);
+        if ($date instanceof DateTimeImmutable) {
+            return $date->format('Y/m/d H:i:s');
+        }
+    }
+
+    try {
+        return (new DateTimeImmutable($text))->format('Y/m/d H:i:s');
+    } catch (Throwable) {
+        return $text;
+    }
+}
+
 function extract_display_data(array $row): array
 {
     $payload = json_decode((string)($row['raw_json'] ?? ''), true);
@@ -47,6 +78,7 @@ function extract_display_data(array $row): array
         $payload['入金日'] ?? null,
         $payload['イベント作成日時'] ?? null,
         $payload['課金作成日時'] ?? null,
+        $payload['data']['created_on'] ?? null,
         $row['received_at'] ?? null,
     ]);
 
@@ -61,9 +93,12 @@ function extract_display_data(array $row): array
         $payload['入金者名'] ?? null,
         $payload['氏名'] ?? null,
         $payload['カード名義'] ?? null,
+        $payload['data']['metadata']['univapay-name'] ?? null,
+        $payload['data']['metadata']['name'] ?? null,
     ]);
 
     return [
+        'payment_date' => format_display_datetime($paymentDate),
         'payment_date' => $paymentDate ?? '',
         'payment_amount' => $paymentAmount ?? '',
         'payer_name' => $payerName ?? '',
@@ -87,7 +122,7 @@ if (file_exists(DB_FILE)) {
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
 
-        $dateExpr = "date(COALESCE(NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), ''), received_at))";
+        $dateExpr = "date(COALESCE(NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), ''), NULLIF(json_extract(raw_json, '$.data.created_on'), ''), received_at))";
         $bucketExpr = $groupBy === 'month'
             ? "strftime('%Y-%m', {$dateExpr})"
             : $dateExpr;

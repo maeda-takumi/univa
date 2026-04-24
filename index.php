@@ -58,6 +58,37 @@ function parse_json_if_needed(mixed $value): mixed
     return $value;
 }
 
+function format_display_datetime(?string $value): string
+{
+    if ($value === null) {
+        return '';
+    }
+
+    $text = trim($value);
+    if ($text === '') {
+        return '';
+    }
+
+    $formats = [
+        'Y/m/d H:i:s',
+        'Y-m-d H:i:s',
+        DateTimeInterface::ATOM,
+    ];
+
+    foreach ($formats as $format) {
+        $date = DateTimeImmutable::createFromFormat($format, $text);
+        if ($date instanceof DateTimeImmutable) {
+            return $date->format('Y/m/d H:i:s');
+        }
+    }
+
+    try {
+        return (new DateTimeImmutable($text))->format('Y/m/d H:i:s');
+    } catch (Throwable) {
+        return $text;
+    }
+}
+
 function extract_display_data(array $row): array
 {
     $payload = json_decode((string)($row['raw_json'] ?? ''), true);
@@ -75,6 +106,10 @@ function extract_display_data(array $row): array
         $chargeMetadata = [];
     }
 
+    $webhookMetadata = parse_json_if_needed(get_nested_value($payload, ['data', 'metadata']));
+    if (!is_array($webhookMetadata)) {
+        $webhookMetadata = [];
+    }
     $paymentDate = first_non_empty_value([
         $payload['入金日'] ?? null,
         $payload['イベント作成日時'] ?? null,
@@ -100,6 +135,8 @@ function extract_display_data(array $row): array
         $tokenMetadata['name'] ?? null,
         $chargeMetadata['univapay-name'] ?? null,
         $chargeMetadata['name'] ?? null,
+        $webhookMetadata['univapay-name'] ?? null,
+        $webhookMetadata['name'] ?? null,
         get_nested_value($payload, ['customer', 'name']),
         get_nested_value($payload, ['data', 'customer_name']),
     ]);
@@ -110,10 +147,11 @@ function extract_display_data(array $row): array
         get_nested_value($payload, ['data', 'email']),
         $tokenMetadata['email'] ?? null,
         $chargeMetadata['email'] ?? null,
+        $webhookMetadata['email'] ?? null,
     ]);
 
     return [
-        'payment_date' => $paymentDate ?? '',
+        'payment_date' => format_display_datetime($paymentDate),
         'payment_amount' => $paymentAmount ?? '',
         'payer_name' => $payerName ?? '',
         'email' => $email ?? '',
@@ -242,7 +280,7 @@ if ($dbExists) {
         $whereConditions = ["TRIM(IFNULL(status, '')) <> ''"];
         $params = [];
 
-        $paymentDateExpression = "date(COALESCE(NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), ''), received_at))";
+        $paymentDateExpression = "date(COALESCE(NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), ''), NULLIF(json_extract(raw_json, '$.data.created_on'), ''), received_at))";
         if ($filters['payment_date_from'] !== '') {
             $whereConditions[] = "{$paymentDateExpression} >= :payment_date_from";
             $params[':payment_date_from'] = $filters['payment_date_from'];
