@@ -57,36 +57,27 @@ CREATE TABLE IF NOT EXISTS webhook_raw_events (
 CREATE TABLE IF NOT EXISTS payment_facts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     source TEXT NOT NULL CHECK(source IN ('CSV', 'WEBHOOK')),
-    source_event_id INTEGER NOT NULL,
-    occurred_at_jst TEXT NOT NULL,
-    payment_date_jst TEXT NOT NULL,
+    source_event_id INTEGER,
+    payment_date_jst TEXT NOT NULL,    payer_name TEXT,
+    amount INTEGER,
+    email TEXT,
     event_type_norm TEXT,
     status_norm TEXT,
-    status_raw TEXT,
-    transaction_id TEXT,
-    charge_id TEXT,
-    store_id TEXT,
-    customer_ref TEXT,
-    amount INTEGER,
-    currency TEXT,
-    livemode INTEGER,
-    payer_name TEXT,
-    email TEXT,
     raw_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    UNIQUE(source, source_event_id)
+    UNIQUE(source, source_event_id, payment_date_jst)
 );
 CREATE INDEX IF NOT EXISTS idx_payment_facts_payment_date ON payment_facts(payment_date_jst);
 CREATE INDEX IF NOT EXISTS idx_payment_facts_status ON payment_facts(status_norm);
-CREATE INDEX IF NOT EXISTS idx_payment_facts_txid ON payment_facts(transaction_id);
+CREATE INDEX IF NOT EXISTS idx_payment_facts_source ON payment_facts(source);
 
 DROP TABLE IF EXISTS webhook_events;
 DROP VIEW IF EXISTS webhook_events;
 CREATE VIEW webhook_events AS
 SELECT
     id,
-    occurred_at_jst AS received_at,
+    payment_date_jst AS received_at,
     payment_date_jst AS payment_date,
     NULL AS request_method,
     NULL AS remote_addr,
@@ -95,14 +86,16 @@ SELECT
     NULL AS content_type,
     event_type_norm AS event_type,
     status_norm AS status,
-    status_raw,
-    transaction_id,
-    charge_id,
-    store_id,
-    customer_ref AS customer_id,
+    NULL AS status_raw,
+    NULL AS transaction_id,
+    NULL AS charge_id,
+    NULL AS store_id,
+    NULL AS customer_id,
     amount,
-    currency,
-    livemode,
+    NULL AS currency,
+    NULL AS livemode,
+    payer_name,
+    email,
     source,
     raw_json
 FROM payment_facts;
@@ -169,26 +162,26 @@ def normalize_event(raw: str | None) -> str | None:
     if not n:
         return None
     direct = {
-        "charge_finished": "売上",
-        "charge_pending": "処理待ち",
+        "charge_finished": "決済処理完了",
+        "charge_pending": "決済処理待ち",
         "charge_canceled": "キャンセル",
         "charge_cancelled": "キャンセル",
-        "charge_refunded": "赤伝返金",
+        "charge_refunded": "返金処理完了",
         "chargeback_created": "チャージバック",
-        "token_created": "リカーリングトークン発行",
-        "token_three_ds_updated": "3-Dセキュア認証",
+        "token_created": "トークン作成",
+        "token_three_ds_updated": "3Dセキュア状態更新",
     }
     if n in direct:
         return direct[n]
     mapping = [
-        (("three_ds", "3ds"), "3-Dセキュア認証"),
-        (("token",), "リカーリングトークン発行"),
+        (("three_ds", "3ds"), "3Dセキュア状態更新"),
+        (("token",), "トークン作成/更新"),
         (("chargeback",), "チャージバック"),
-        (("refund",), "赤伝返金"),
+        (("refund",), "返金処理完了"),
         (("cancel", "canceled", "cancelled", "void"), "キャンセル"),
         (("pending", "processing"), "処理待ち"),
-        (("failed", "failure", "error", "decline"), "売上失敗"),
-        (("payment", "charge", "capture", "売上"), "売上"),
+        (("failed", "failure", "error", "decline"), "失敗"),
+        (("payment", "charge", "capture", "売上"), "決済処理完了"),
     ]
     for keywords, out in mapping:
         if any(k in n for k in keywords):
@@ -288,29 +281,19 @@ def main() -> int:
             conn.execute(
                 """
                 INSERT INTO payment_facts (
-                    source, source_event_id, occurred_at_jst, payment_date_jst,
-                    event_type_norm, status_norm, status_raw, transaction_id,
-                    charge_id, store_id, customer_ref, amount, currency, livemode,
-                    payer_name, email, raw_json, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    source, source_event_id, payment_date_jst, payer_name, amount, email,
+                    event_type_norm, status_norm, raw_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     "CSV",
                     source_event_id,
                     parse_dt_jst(occurred_raw),
-                    parse_dt_jst(occurred_raw),
+                    (row.get("入金者名") or row.get("氏名") or row.get("カード名義") or "").strip() or None,
+                    to_int_or_none(amount_raw),
+                    (row.get("メールアドレス") or "").strip() or None,
                     normalize_event(event_type_raw),
                     normalize_status(status_raw),
-                    status_raw,
-                    (row.get("トークンID") or "").strip() or None,
-                    (row.get("課金ID") or "").strip() or None,
-                    (row.get("店舗") or "").strip() or None,
-                    (row.get("メールアドレス") or row.get("電話番号") or "").strip() or None,
-                    to_int_or_none(amount_raw),
-                    currency_raw,
-                    parse_livemode(row.get("モード")),
-                    (row.get("入金者名") or row.get("氏名") or row.get("カード名義") or "").strip() or None,
-                    (row.get("メールアドレス") or "").strip() or None,
                     json.dumps(row, ensure_ascii=False),
                     now,
                     now,

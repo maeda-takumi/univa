@@ -112,28 +112,28 @@ function normalize_event(?string $raw): ?string
     }
 
     $direct = [
-        'charge_finished' => '売上',
-        'charge_pending' => '処理待ち',
+        'charge_finished' => '決済処理完了',
+        'charge_pending' => '決済処理待ち',
         'charge_canceled' => 'キャンセル',
         'charge_cancelled' => 'キャンセル',
-        'charge_refunded' => '赤伝返金',
+        'charge_refunded' => '返金処理完了',
         'chargeback_created' => 'チャージバック',
-        'token_created' => 'リカーリングトークン発行',
-        'token_three_ds_updated' => '3-Dセキュア認証',
+        'token_created' => 'トークン作成',
+        'token_three_ds_updated' => '3Dセキュア状態更新',
     ];
     if (array_key_exists($normalized, $direct)) {
         return $direct[$normalized];
     }
 
     $keywordMappings = [
-        [['three_ds', '3ds'], '3-Dセキュア認証'],
-        [['token'], 'リカーリングトークン発行'],
+        [['three_ds', '3ds'], '3Dセキュア状態更新'],
+        [['token'], 'トークン作成/更新'],
         [['chargeback'], 'チャージバック'],
-        [['refund'], '赤伝返金'],
+        [['refund'], '返金処理完了'],
         [['cancel', 'canceled', 'cancelled', 'void'], 'キャンセル'],
         [['pending', 'processing'], '処理待ち'],
-        [['failed', 'failure', 'error', 'decline'], '売上失敗'],
-        [['payment', 'charge', 'capture'], '売上'],
+        [['failed', 'failure', 'error', 'decline'], '失敗'],
+        [['payment', 'charge', 'capture'], '決済処理完了'],
     ];
 
     foreach ($keywordMappings as [$keywords, $jp]) {
@@ -213,30 +213,22 @@ function ensure_schema(PDO $pdo): void
         "CREATE TABLE IF NOT EXISTS payment_facts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             source TEXT NOT NULL CHECK(source IN ('CSV', 'WEBHOOK')),
-            source_event_id INTEGER NOT NULL,
-            occurred_at_jst TEXT NOT NULL,
+            source_event_id INTEGER,
             payment_date_jst TEXT NOT NULL,
+            payer_name TEXT,
+            amount INTEGER,
+            email TEXT,
             event_type_norm TEXT,
             status_norm TEXT,
-            status_raw TEXT,
-            transaction_id TEXT,
-            charge_id TEXT,
-            store_id TEXT,
-            customer_ref TEXT,
-            amount INTEGER,
-            currency TEXT,
-            livemode INTEGER,
-            payer_name TEXT,
-            email TEXT,
             raw_json TEXT NOT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            UNIQUE(source, source_event_id)
+            UNIQUE(source, source_event_id, payment_date_jst)
         )"
     );
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_payment_facts_payment_date ON payment_facts(payment_date_jst)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_payment_facts_status ON payment_facts(status_norm)');
-    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_payment_facts_txid ON payment_facts(transaction_id)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_payment_facts_source ON payment_facts(source)');
 
     $pdo->exec('DROP TABLE IF EXISTS webhook_events');
     $pdo->exec('DROP VIEW IF EXISTS webhook_events');
@@ -244,7 +236,7 @@ function ensure_schema(PDO $pdo): void
         "CREATE VIEW webhook_events AS
         SELECT
             id,
-            occurred_at_jst AS received_at,
+            payment_date_jst AS received_at,
             payment_date_jst AS payment_date,
             NULL AS request_method,
             NULL AS remote_addr,
@@ -253,14 +245,16 @@ function ensure_schema(PDO $pdo): void
             NULL AS content_type,
             event_type_norm AS event_type,
             status_norm AS status,
-            status_raw,
-            transaction_id,
-            charge_id,
-            store_id,
-            customer_ref AS customer_id,
+            NULL AS status_raw,
+            NULL AS transaction_id,
+            NULL AS charge_id,
+            NULL AS store_id,
+            NULL AS customer_id,
             amount,
-            currency,
-            livemode,
+            NULL AS currency,
+            NULL AS livemode,
+            payer_name,
+            email,
             source,
             raw_json
         FROM payment_facts"
@@ -302,7 +296,7 @@ try {
     ]);
 
     $statusRaw = first_non_empty([
-        $payload['status'] ?? null,
+        get_nested($payload, ['data', 'status']),
         get_nested($payload, ['data', 'status']),
         get_nested($payload, ['data', 'three_ds', 'status']),
         get_nested($payload, ['data', 'data', 'three_ds', 'status']),
@@ -318,20 +312,6 @@ try {
         get_nested($payload, ['data', 'created_on']),
         get_nested($payload, ['created_on']),
     ]);
-    $transactionId = first_non_empty([
-        $payload['transaction_id'] ?? null,
-        $payload['id'] ?? null,
-        get_nested($payload, ['data', 'transaction_id']),
-        get_nested($payload, ['data', 'transaction_token_id']),
-        get_nested($payload, ['transaction', 'id']),
-    ]);
-
-    $chargeId = first_non_empty([
-        $payload['charge_id'] ?? null,
-        get_nested($payload, ['data', 'charge_id']),
-        get_nested($payload, ['data', 'id']),
-        get_nested($payload, ['charge', 'id']),
-    ]);
 
     $storeId = first_non_empty([
         $payload['store_id'] ?? null,
@@ -340,8 +320,8 @@ try {
     ]);
 
     $customerRef = first_non_empty([
-        $payload['customer_id'] ?? null,
         get_nested($payload, ['data', 'customer_id']),
+        $payload['customer_id'] ?? null,
         get_nested($payload, ['customer', 'id']),
         get_nested($payload, ['data', 'email']),
     ]);
@@ -393,8 +373,8 @@ try {
         ':content_type' => $_SERVER['CONTENT_TYPE'] ?? null,
         ':event_type_raw' => $eventTypeRaw,
         ':status_raw' => $statusRaw,
-        ':transaction_id' => $transactionId,
-        ':charge_id' => $chargeId,
+        ':transaction_id' => first_non_empty([$payload['id'] ?? null, get_nested($payload, ['data', 'id'])]),
+        ':charge_id' => first_non_empty([$payload['charge_id'] ?? null, get_nested($payload, ['data', 'charge_id'])]),
         ':store_id' => $storeId,
         ':customer_ref' => $customerRef,
         ':amount_raw' => $amountRaw,
@@ -405,42 +385,32 @@ try {
 
     $sourceEventId = (int)$pdo->lastInsertId();
     $payerName = first_non_empty([
+        get_nested($payload, ['data', 'metadata', 'univapay-name']),
+        get_nested($payload, ['data', 'metadata', 'name']),
         $payload['入金者名'] ?? null,
         $payload['氏名'] ?? null,
         $payload['カード名義'] ?? null,
-        get_nested($payload, ['data', 'metadata', 'univapay-name']),
-        get_nested($payload, ['data', 'metadata', 'name']),
     ]);
     $email = first_non_empty([
-        $payload['メールアドレス'] ?? null,
         get_nested($payload, ['data', 'email']),
+        $payload['メールアドレス'] ?? null,
         get_nested($payload, ['customer', 'email']),
     ]);
 
     $factStmt = $pdo->prepare(
         'INSERT INTO payment_facts (
-            source, source_event_id, occurred_at_jst, payment_date_jst, event_type_norm,
-            status_norm, status_raw, transaction_id, charge_id, store_id, customer_ref,
-            amount, currency, livemode, payer_name, email, raw_json, created_at, updated_at
+            source, source_event_id, payment_date_jst, payer_name, amount, email,
+            event_type_norm, status_norm, raw_json, created_at, updated_at
         ) VALUES (
-            :source, :source_event_id, :occurred_at_jst, :payment_date_jst, :event_type_norm,
-            :status_norm, :status_raw, :transaction_id, :charge_id, :store_id, :customer_ref,
-            :amount, :currency, :livemode, :payer_name, :email, :raw_json, :created_at, :updated_at
-        ) ON CONFLICT(source, source_event_id) DO UPDATE SET
-            occurred_at_jst=excluded.occurred_at_jst,
+            :source, :source_event_id, :payment_date_jst, :payer_name, :amount, :email,
+            :event_type_norm, :status_norm, :raw_json, :created_at, :updated_at
+        ) ON CONFLICT(source, source_event_id, payment_date_jst) DO UPDATE SET
             payment_date_jst=excluded.payment_date_jst,
+            payer_name=excluded.payer_name,
+            amount=excluded.amount,
+            email=excluded.email,
             event_type_norm=excluded.event_type_norm,
             status_norm=excluded.status_norm,
-            status_raw=excluded.status_raw,
-            transaction_id=excluded.transaction_id,
-            charge_id=excluded.charge_id,
-            store_id=excluded.store_id,
-            customer_ref=excluded.customer_ref,
-            amount=excluded.amount,
-            currency=excluded.currency,
-            livemode=excluded.livemode,
-            payer_name=excluded.payer_name,
-            email=excluded.email,
             raw_json=excluded.raw_json,
             updated_at=excluded.updated_at'
     );
@@ -448,20 +418,12 @@ try {
     $factStmt->execute([
         ':source' => 'WEBHOOK',
         ':source_event_id' => $sourceEventId,
-        ':occurred_at_jst' => to_jst_datetime_string($occurredRaw ?? $receivedAt),
         ':payment_date_jst' => to_jst_datetime_string($occurredRaw ?? $receivedAt),
+        ':payer_name' => $payerName,
+        ':amount' => $amount,
+        ':email' => $email,
         ':event_type_norm' => normalize_event($eventTypeRaw),
         ':status_norm' => normalize_status($statusRaw),
-        ':status_raw' => $statusRaw,
-        ':transaction_id' => $transactionId,
-        ':charge_id' => $chargeId,
-        ':store_id' => $storeId,
-        ':customer_ref' => $customerRef,
-        ':amount' => $amount,
-        ':currency' => $currency,
-        ':livemode' => in_array(strtolower((string)$livemodeRaw), ['1', 'true', 'live', '本番'], true) ? 1 : 0,
-        ':payer_name' => $payerName,
-        ':email' => $email,
         ':raw_json' => $rawBody,
         ':created_at' => $now,
         ':updated_at' => $now,

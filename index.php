@@ -287,7 +287,7 @@ $defaultFilters = [
     'payment_date_to' => '',
     'payer_name' => '',
     'email' => '',
-    'event_type' => '売上',
+    'event_type' => '決済処理完了',
     'status' => '成功',
 ];
 $sessionFilters = $_SESSION['index_filters'] ?? [];

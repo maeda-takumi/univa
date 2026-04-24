@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +59,6 @@ def normalize_event(raw: str | None) -> str | None:
         (("pending", "processing"), "処理待ち"),
         (("failed", "failure", "error", "decline"), "売上失敗"),
         (("payment", "charge", "capture"), "売上"),
-
     ]
 
     for keys, out in mapping:
@@ -69,18 +68,24 @@ def normalize_event(raw: str | None) -> str | None:
 
 
 def to_jst(value: str | None) -> str:
+    jst = timezone(timedelta(hours=9))
+    try:
+        from zoneinfo import ZoneInfo
+        jst = ZoneInfo("Asia/Tokyo")
+    except Exception:
+        jst = timezone(timedelta(hours=9))
     if value:
         t = value.strip()
         if t:
             for fmt in ("%Y-%m-%d %H:%M:%S", "%Y/%m/%d %H:%M:%S"):
                 try:
                     dt = datetime.strptime(t, fmt).replace(tzinfo=timezone.utc)
-                    return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+                    return dt.astimezone(jst).strftime("%Y-%m-%d %H:%M:%S")
                 except ValueError:
                     pass
             try:
                 dt = datetime.fromisoformat(t.replace("Z", "+00:00"))
-                return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+                return dt.astimezone(jst).strftime("%Y-%m-%d %H:%M:%S")
             except ValueError:
                 pass
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -139,26 +144,16 @@ def main() -> int:
             conn.execute(
                 """
                 INSERT INTO payment_facts (
-                    source, source_event_id, occurred_at_jst, payment_date_jst,
-                    event_type_norm, status_norm, status_raw, transaction_id,
-                    charge_id, store_id, customer_ref, amount, currency, livemode,
-                    payer_name, email, raw_json, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(source, source_event_id) DO UPDATE SET
-                    occurred_at_jst=excluded.occurred_at_jst,
+                    source, source_event_id, payment_date_jst, payer_name, amount, email,
+                    event_type_norm, status_norm, raw_json, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source, source_event_id, payment_date_jst) DO UPDATE SET
                     payment_date_jst=excluded.payment_date_jst,
+                    payer_name=excluded.payer_name,
+                    amount=excluded.amount,
+                    email=excluded.email,
                     event_type_norm=excluded.event_type_norm,
                     status_norm=excluded.status_norm,
-                    status_raw=excluded.status_raw,
-                    transaction_id=excluded.transaction_id,
-                    charge_id=excluded.charge_id,
-                    store_id=excluded.store_id,
-                    customer_ref=excluded.customer_ref,
-                    amount=excluded.amount,
-                    currency=excluded.currency,
-                    livemode=excluded.livemode,
-                    payer_name=excluded.payer_name,
-                    email=excluded.email,
                     raw_json=excluded.raw_json,
                     updated_at=excluded.updated_at
                 """,
@@ -166,19 +161,11 @@ def main() -> int:
                     "WEBHOOK",
                     row["id"],
                     to_jst(occurred),
-                    to_jst(occurred),
+                    payer_name,
+                    amount,
+                    email,
                     normalize_event(row["event_type_raw"]),
                     normalize_status(row["status_raw"]),
-                    row["status_raw"],
-                    row["transaction_id"],
-                    row["charge_id"],
-                    row["store_id"],
-                    row["customer_ref"],
-                    amount,
-                    row["currency_raw"],
-                    1 if str(row["livemode_raw"] or "").lower() in {"1", "true", "live", "本番"} else 0,
-                    payer_name,
-                    email,
                     row["payload_json"],
                     now,
                     now,
