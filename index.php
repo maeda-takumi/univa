@@ -245,15 +245,19 @@ function status_badge_class(string $status): string
 
     return 'status-info';
 }
-function build_page_url(int $page, array $filters): string
+function build_page_url(int $page, array $queryParams): string
 {
-    $params = ['page' => $page];
-    foreach ($filters as $key => $value) {
-        if ($value === '') {
+    $params = $queryParams;
+    unset($params['page']);
+
+    foreach ($params as $key => $value) {
+        if ($value === '' || $value === null) {
+            unset($params[$key]);
             continue;
         }
-        $params[$key] = $value;
     }
+
+    $params['page'] = $page;
     return '?' . http_build_query($params);
 }
 
@@ -266,6 +270,7 @@ $filters = [
     'status' => trim((string)($_GET['status'] ?? '成功')),
 ];
 $page = max(1, (int)($_GET['page'] ?? 1));
+$currentQuery = $_GET;
 
 $dbExists = file_exists(DB_FILE);
 $rows = [];
@@ -518,17 +523,17 @@ require __DIR__ . '/header.php';
         <?php $prevPage = max(1, $page - 1); ?>
         <?php $nextPage = min($totalPages, $page + 1); ?>
 
-        <a class="page-link <?= $page <= 1 ? 'disabled' : '' ?>" href="<?= $page <= 1 ? '#' : h(build_page_url($prevPage, $filters)) ?>">前へ</a>
+        <a class="page-link <?= $page <= 1 ? 'disabled' : '' ?>" href="<?= $page <= 1 ? '#' : h(build_page_url($prevPage, $currentQuery)) ?>">前へ</a>
 
         <?php
         $start = max(1, $page - 2);
         $end = min($totalPages, $page + 2);
         for ($i = $start; $i <= $end; $i++):
         ?>
-            <a class="page-link <?= $i === $page ? 'active' : '' ?>" href="<?= h(build_page_url($i, $filters)) ?>"><?= $i ?></a>
+            <a class="page-link <?= $i === $page ? 'active' : '' ?>" href="<?= h(build_page_url($i, $currentQuery)) ?>"><?= $i ?></a>
         <?php endfor; ?>
 
-        <a class="page-link <?= $page >= $totalPages ? 'disabled' : '' ?>" href="<?= $page >= $totalPages ? '#' : h(build_page_url($nextPage, $filters)) ?>">次へ</a>
+        <a class="page-link <?= $page >= $totalPages ? 'disabled' : '' ?>" href="<?= $page >= $totalPages ? '#' : h(build_page_url($nextPage, $currentQuery)) ?>">次へ</a>
     </nav>
 </section>
 
