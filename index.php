@@ -117,8 +117,6 @@ function extract_display_data(array $row): array
         $payload['イベント作成日時'] ?? null,
         $payload['課金作成日時'] ?? null,
         get_nested_value($payload, ['data', 'created_on']),
-        $row['payment_date'] ?? null,
-        $row['received_at'] ?? null,
     ]);
 
     $paymentAmount = first_non_empty_value([
@@ -352,10 +350,6 @@ if ($dbExists) {
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.\\\"イベント作成日時\\\"'), '')";
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.\\\"課金作成日時\\\"'), '')";
         $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.data.created_on'), '')";
-        if ($hasPaymentDateColumn) {
-            $paymentDateSources[] = "NULLIF(payment_date, '')";
-        }
-        $paymentDateSources[] = "received_at";
         $paymentDateExpression = 'date(COALESCE(' . implode(', ', $paymentDateSources) . '))';
 
         if ($filters['payment_date_from'] !== '') {
