@@ -10,6 +10,7 @@ declare(strict_types=1);
 // =========================
 const DB_DIR = __DIR__ . '/data';
 const DB_FILE = DB_DIR . '/univapay_webhook.sqlite';
+const RAW_DB_FILE = DB_DIR . '/univapay_webhook_raw.sqlite';
 const LOG_FILE = DB_DIR . '/univapay_webhook_error.log';
 
 // Optional shared secret check.
@@ -102,6 +103,53 @@ function get_pdo(): PDO
         $pdo->exec('ALTER TABLE webhook_events ADD COLUMN status_raw TEXT');
         $pdo->exec("UPDATE webhook_events SET status_raw = status WHERE status_raw IS NULL");
     }
+    $hasSource = false;
+    foreach ($columns as $column) {
+        if (($column['name'] ?? null) === 'source') {
+            $hasSource = true;
+            break;
+        }
+    }
+    if (!$hasSource) {
+        $pdo->exec("ALTER TABLE webhook_events ADD COLUMN source TEXT NOT NULL DEFAULT 'WEBHOOK'");
+    }
+
+    return $pdo;
+}
+
+function get_raw_pdo(): PDO
+{
+    ensure_data_dir_exists(DB_DIR);
+
+    $pdo = new PDO('sqlite:' . RAW_DB_FILE);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS webhook_raw_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            received_at TEXT NOT NULL,
+            request_method TEXT,
+            remote_addr TEXT,
+            user_agent TEXT,
+            authorization_header TEXT,
+            content_type TEXT,
+            event_type TEXT,
+            status_raw TEXT,
+            transaction_id TEXT,
+            charge_id TEXT,
+            store_id TEXT,
+            customer_id TEXT,
+            amount INTEGER,
+            currency TEXT,
+            livemode INTEGER,
+            raw_json TEXT NOT NULL
+        )'
+    );
+
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webhook_raw_events_received_at ON webhook_raw_events(received_at)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webhook_raw_events_event_type ON webhook_raw_events(event_type)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webhook_raw_events_transaction_id ON webhook_raw_events(transaction_id)');
     return $pdo;
 }
 
@@ -306,6 +354,65 @@ try {
         ?? null;
     $livemode = is_bool($livemodeRaw) ? ($livemodeRaw ? 1 : 0) : null;
 
+    $receivedAt = date('Y-m-d H:i:s');
+    $commonInsertParams = [
+        ':received_at' => $receivedAt,
+        ':request_method' => $_SERVER['REQUEST_METHOD'] ?? null,
+        ':remote_addr' => $_SERVER['REMOTE_ADDR'] ?? null,
+        ':user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+        ':authorization_header' => $authorization !== '' ? $authorization : null,
+        ':content_type' => $_SERVER['CONTENT_TYPE'] ?? null,
+        ':event_type' => $eventType,
+        ':status_raw' => $statusRaw,
+        ':transaction_id' => $transactionId,
+        ':charge_id' => $chargeId,
+        ':store_id' => $storeId,
+        ':customer_id' => $customerId,
+        ':amount' => $amount,
+        ':currency' => $currency,
+        ':livemode' => $livemode,
+        ':raw_json' => $rawBody,
+    ];
+
+    $rawPdo = get_raw_pdo();
+    $rawStmt = $rawPdo->prepare(
+        'INSERT INTO webhook_raw_events (
+            received_at,
+            request_method,
+            remote_addr,
+            user_agent,
+            authorization_header,
+            content_type,
+            event_type,
+            status_raw,
+            transaction_id,
+            charge_id,
+            store_id,
+            customer_id,
+            amount,
+            currency,
+            livemode,
+            raw_json
+        ) VALUES (
+            :received_at,
+            :request_method,
+            :remote_addr,
+            :user_agent,
+            :authorization_header,
+            :content_type,
+            :event_type,
+            :status_raw,
+            :transaction_id,
+            :charge_id,
+            :store_id,
+            :customer_id,
+            :amount,
+            :currency,
+            :livemode,
+            :raw_json
+        )'
+    );
+    $rawStmt->execute($commonInsertParams);
     $pdo = get_pdo();
 
     $stmt = $pdo->prepare(
@@ -326,6 +433,7 @@ try {
             amount,
             currency,
             livemode,
+            source,
             raw_json
         ) VALUES (
             :received_at,
@@ -344,28 +452,30 @@ try {
             :amount,
             :currency,
             :livemode,
+            :source,
             :raw_json
         )'
     );
 
     $stmt->execute([
-        ':received_at' => date('Y-m-d H:i:s'),
-        ':request_method' => $_SERVER['REQUEST_METHOD'] ?? null,
-        ':remote_addr' => $_SERVER['REMOTE_ADDR'] ?? null,
-        ':user_agent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
-        ':authorization_header' => $authorization !== '' ? $authorization : null,
-        ':content_type' => $_SERVER['CONTENT_TYPE'] ?? null,
-        ':event_type' => $eventType,
+        ':received_at' => $commonInsertParams[':received_at'],
+        ':request_method' => $commonInsertParams[':request_method'],
+        ':remote_addr' => $commonInsertParams[':remote_addr'],
+        ':user_agent' => $commonInsertParams[':user_agent'],
+        ':authorization_header' => $commonInsertParams[':authorization_header'],
+        ':content_type' => $commonInsertParams[':content_type'],
+        ':event_type' => $commonInsertParams[':event_type'],
         ':status' => $status,
-        ':status_raw' => $statusRaw,
-        ':transaction_id' => $transactionId,
-        ':charge_id' => $chargeId,
-        ':store_id' => $storeId,
-        ':customer_id' => $customerId,
-        ':amount' => $amount,
-        ':currency' => $currency,
-        ':livemode' => $livemode,
-        ':raw_json' => $rawBody,
+        ':status_raw' => $commonInsertParams[':status_raw'],
+        ':transaction_id' => $commonInsertParams[':transaction_id'],
+        ':charge_id' => $commonInsertParams[':charge_id'],
+        ':store_id' => $commonInsertParams[':store_id'],
+        ':customer_id' => $commonInsertParams[':customer_id'],
+        ':amount' => $commonInsertParams[':amount'],
+        ':currency' => $commonInsertParams[':currency'],
+        ':livemode' => $commonInsertParams[':livemode'],
+        ':source' => 'WEBHOOK',
+        ':raw_json' => $commonInsertParams[':raw_json'],
     ]);
 
     send_json(200, [
