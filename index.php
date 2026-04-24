@@ -113,11 +113,11 @@ function extract_display_data(array $row): array
         $webhookMetadata = [];
     }
     $paymentDate = first_non_empty_value([
-        $row['payment_date'] ?? null,
         $payload['入金日'] ?? null,
         $payload['イベント作成日時'] ?? null,
         $payload['課金作成日時'] ?? null,
         get_nested_value($payload, ['data', 'created_on']),
+        $row['payment_date'] ?? null,
         $row['received_at'] ?? null,
     ]);
 
@@ -348,11 +348,13 @@ if ($dbExists) {
         $params = [];
 
         $paymentDateSources = [];
+        $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), '')";
+        $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.\\\"イベント作成日時\\\"'), '')";
+        $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.\\\"課金作成日時\\\"'), '')";
+        $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.data.created_on'), '')";
         if ($hasPaymentDateColumn) {
             $paymentDateSources[] = "NULLIF(payment_date, '')";
         }
-        $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.\\\"入金日\\\"'), '')";
-        $paymentDateSources[] = "NULLIF(json_extract(raw_json, '$.data.created_on'), '')";
         $paymentDateSources[] = "received_at";
         $paymentDateExpression = 'date(COALESCE(' . implode(', ', $paymentDateSources) . '))';
 
