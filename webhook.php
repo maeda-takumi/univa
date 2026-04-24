@@ -268,40 +268,38 @@ function translate_event_to_japanese(?string $eventRaw): ?string
         return null;
     }
 
-    $map = [
+    // migrate_univapay_raw_to_webhook.py の normalize_event_type と同じ変換ロジック。
+    $directMappings = [
         'charge_finished' => '売上',
-        'charge_created' => '売上作成',
-        'charge_updated' => '売上更新',
-        'charge_captured' => '売上確定',
-        'charge_authorized' => 'オーソリ',
-        'charge_refunded' => '返金',
-        'charge_cancelled' => '取消',
-        'subscription_started' => '定期課金開始',
-        'subscription_renewed' => '定期課金更新',
-        'subscription_suspended' => '定期課金停止',
-        'subscription_cancelled' => '定期課金解約',
-        'token_created' => 'トークン作成',
-        'token_deleted' => 'トークン削除',
+        'charge_pending' => '処理待ち',
+        'charge_canceled' => 'キャンセル',
+        'charge_cancelled' => 'キャンセル',
+        'charge_refunded' => '赤伝返金',
+        'chargeback_created' => 'チャージバック',
+        'token_created' => 'リカーリングトークン発行',
+        'token_three_ds_updated' => '3-Dセキュア認証',
+    ];
+    if (array_key_exists($normalized, $directMappings)) {
+        return $directMappings[$normalized];
+    }
+
+    $keywordMappings = [
+        [['three_ds', '3ds'], '3-Dセキュア認証'],
+        [['token'], 'リカーリングトークン発行'],
+        [['chargeback'], 'チャージバック'],
+        [['refund'], '赤伝返金'],
+        [['cancel', 'canceled', 'cancelled', 'void'], 'キャンセル'],
+        [['pending', 'processing'], '処理待ち'],
+        [['failed', 'failure', 'error', 'decline'], '売上失敗'],
+        [['payment', 'charge', 'capture'], '売上'],
     ];
 
-    if (array_key_exists($normalized, $map)) {
-        return $map[$normalized];
-    }
-
-    if (str_contains($normalized, 'refund')) {
-        return '返金';
-    }
-    if (str_contains($normalized, 'cancel')) {
-        return '取消';
-    }
-    if (str_contains($normalized, 'subscription')) {
-        return '定期課金';
-    }
-    if (str_contains($normalized, 'charge')) {
-        return '売上';
-    }
-    if (str_contains($normalized, 'token')) {
-        return 'トークン';
+    foreach ($keywordMappings as [$keywords, $jp]) {
+        foreach ($keywords as $keyword) {
+            if (str_contains($normalized, $keyword)) {
+                return $jp;
+            }
+        }
     }
 
     return $eventRaw;
