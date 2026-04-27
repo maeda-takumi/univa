@@ -230,8 +230,8 @@ function ensure_schema(PDO $pdo): void
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_payment_facts_status ON payment_facts(status_norm)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_payment_facts_source ON payment_facts(source)');
 
-    $pdo->exec('DROP TABLE IF EXISTS webhook_events');
     $pdo->exec('DROP VIEW IF EXISTS webhook_events');
+    $pdo->exec('DROP TABLE IF EXISTS webhook_events');
     $pdo->exec(
         "CREATE VIEW webhook_events AS
         SELECT
