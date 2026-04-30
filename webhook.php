@@ -2,22 +2,19 @@
 declare(strict_types=1);
 
 const DB_DIR = __DIR__ . '/data';
-const DB_FILE = DB_DIR . '/univapay_webhook.sqlite';
-const LOG_FILE = DB_DIR . '/univapay_webhook_error.log';
 
+const DB_FILE = DB_DIR . '/payments.sqlite';
 const EXPECTED_AUTHORIZATION = '';
 
 // =========================
 // Helpers
 // =========================
-function send_json(int $statusCode, array $data): void
-{
-    http_response_code($statusCode);
-    header('Content-Type: application/json; charset=UTF-8');
-    echo json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    exit;
-}
 
+function send_json(int $status, array $payload): void
+    http_response_code($status);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
 
 function ensure_data_dir_exists(string $dir): void
 {
