@@ -115,6 +115,79 @@ function now_utc(): string
     return (new DateTimeImmutable('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s');
 }
 
+function now_jst(): string
+{
+    return (new DateTimeImmutable('now', new DateTimeZone('Asia/Tokyo')))->format('Y-m-d H:i:s');
+}
+
+function to_jst_datetime(?string $value): ?string
+{
+    if ($value === null) {
+        return null;
+    }
+
+    $trimmed = trim($value);
+    if ($trimmed === '') {
+        return null;
+    }
+
+    try {
+        if (ctype_digit($trimmed)) {
+            $dt = (new DateTimeImmutable('@' . $trimmed))->setTimezone(new DateTimeZone('Asia/Tokyo'));
+            return $dt->format('Y-m-d H:i:s');
+        }
+
+        $dt = (new DateTimeImmutable($trimmed, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone('Asia/Tokyo'));
+        return $dt->format('Y-m-d H:i:s');
+    } catch (Throwable) {
+        return $value;
+    }
+}
+
+function to_japanese_status(?string $status): ?string
+{
+    if ($status === null) {
+        return null;
+    }
+
+    $normalized = strtolower(trim($status));
+    $map = [
+        'pending' => '保留',
+        'authorized' => '与信済み',
+        'captured' => '売上確定',
+        'succeeded' => '成功',
+        'failed' => '失敗',
+        'error' => 'エラー',
+        'canceled' => 'キャンセル',
+        'cancelled' => 'キャンセル',
+        'refunded' => '返金済み',
+        'chargeback' => 'チャージバック',
+        'unknown' => '不明',
+    ];
+
+    return $map[$normalized] ?? $status;
+}
+
+function to_japanese_event_type(?string $eventType): ?string
+{
+    if ($eventType === null) {
+        return null;
+    }
+
+    $normalized = strtolower(trim($eventType));
+    $map = [
+        'payment.created' => '決済作成',
+        'payment.updated' => '決済更新',
+        'payment.succeeded' => '決済成功',
+        'payment.failed' => '決済失敗',
+        'payment.canceled' => '決済キャンセル',
+        'payment.cancelled' => '決済キャンセル',
+        'payment.refunded' => '返金完了',
+    ];
+
+    return $map[$normalized] ?? $eventType;
+}
+
 if (!is_dir(DB_DIR)) {
     mkdir(DB_DIR, 0775, true);
 }
@@ -155,7 +228,7 @@ try {
         send_json(400, ['ok' => false, 'message' => 'transaction_id not found']);
     }
 
-    $status = pick_from_child_json_first(
+    $statusRaw = pick_from_child_json_first(
         $payload,
         [
             ['data', 'status'],
@@ -163,19 +236,23 @@ try {
         ],
         [$payload['status'] ?? null]
     ) ?? 'unknown';
+    $status = to_japanese_status($statusRaw) ?? '不明';
 
-    $eventType = first_non_empty([
+    $eventTypeRaw = first_non_empty([
         $payload['event'] ?? null,
         get_nested($payload, ['type']),
         get_nested($payload, ['data', 'event'])
     ]);
     
-    $occurredAt = first_non_empty([
+    $eventType = to_japanese_event_type($eventTypeRaw);
+
+    $occurredAtRaw = first_non_empty([
         get_nested($payload, ['data', 'created_on']),
         get_nested($payload, ['created_on']),
         get_nested($payload, ['occurred_at'])
     ]);
 
+    $occurredAt = to_jst_datetime($occurredAtRaw);
     $amountRaw = pick_from_child_json_first(
         $payload,
         [
@@ -210,7 +287,7 @@ try {
         get_nested($payload, ['event_id'])
     ]);
 
-    $receivedAt = now_utc();
+    $receivedAt = now_jst();
     $payloadHash = hash('sha256', $rawBody);
 
     $pdo = new PDO('sqlite:' . DB_FILE);
