@@ -16,8 +16,11 @@ function to_japanese_status(?string $status): ?string
 
     $normalized = strtolower(trim($status));
     $map = [
-        'pending' => '保留',
-        'authorized' => '与信済み',
+        'pending' => '処理待ち',
+        'awaiting' => '処理待ち',
+        'unverified' => '未確認',
+        'verified' => '確認済み',
+        'processing' => '処理中',
         'captured' => '売上確定',
         'succeeded' => '成功',
         'failed' => '失敗',
@@ -41,16 +44,19 @@ function to_japanese_event_type(?string $eventType): ?string
     $normalized = strtolower(trim($eventType));
     $map = [
         'payment.created' => '決済作成',
+        'payment.awaiting' => '処理待ち',
+        'payment.unverified' => '未確認',
+        'payment.verified' => '確認済み',
         'payment.updated' => '決済更新',
-        'payment.succeeded' => '決済成功',
-        'payment.failed' => '決済失敗',
+        'payment.succeeded' => '売上',
+        'payment.failed' => '売上失敗',
         'payment.canceled' => '決済キャンセル',
         'payment.cancelled' => '決済キャンセル',
         'payment.refunded' => '返金完了',
-        'token_created' => 'トークン作成',
         'token_updated' => 'トークン更新',
         'token_deleted' => 'トークン削除',
         'token_three_ds_updated' => '3Dセキュア更新',
+        'token_created' => 'リカーリングトークン発行',
     ];
 
     return $map[$normalized] ?? $eventType;
