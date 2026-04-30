@@ -47,6 +47,10 @@ function to_japanese_event_type(?string $eventType): ?string
         'payment.canceled' => '決済キャンセル',
         'payment.cancelled' => '決済キャンセル',
         'payment.refunded' => '返金完了',
+        'token_created' => 'トークン作成',
+        'token_updated' => 'トークン更新',
+        'token_deleted' => 'トークン削除',
+        'token_three_ds_updated' => '3Dセキュア更新',
     ];
 
     return $map[$normalized] ?? $eventType;
@@ -104,7 +108,7 @@ include __DIR__ . '/header.php';
                             <small class="tx-id">ID: <?= h($tx['transaction_id']) ?></small>
                         </span>
                         <span class="tx-meta">
-                            <small class="tx-event-date">イベント日: <?= h($tx['last_event_at'] ?: $tx['last_seen_at']) ?></small>
+                            <small class="tx-event-date"><?= h($tx['last_event_at'] ?: $tx['last_seen_at']) ?></small>
                             <em class="status status-<?= h((string)$tx['current_status']) ?>"><?= h(to_japanese_status($tx['current_status']) ?? '不明') ?></em>
                             <b>¥<?= number_format((int)($tx['amount'] ?? 0)) ?></b>
                         </span>
