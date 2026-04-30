@@ -53,6 +53,7 @@ function to_japanese_event_type(?string $eventType): ?string
         'payment.canceled' => '決済キャンセル',
         'payment.cancelled' => '決済キャンセル',
         'payment.refunded' => '返金完了',
+        'charge_finished' => '売上',
         'token_updated' => 'トークン更新',
         'token_deleted' => 'トークン削除',
         'token_three_ds_updated' => '3Dセキュア更新',
