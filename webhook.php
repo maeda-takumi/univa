@@ -203,29 +203,6 @@ try {
     if ($dupStmt->fetchColumn() !== false) {
         $dup = 1;
     }
-    $insertEvent = $pdo->prepare(
-        'INSERT INTO webhook_events (
-            transaction_id, provider_event_id, event_type, status, occurred_at,
-            received_at, payload_json, payload_hash, is_duplicate, created_at
-        ) VALUES (
-            :transaction_id, :provider_event_id, :event_type, :status, :occurred_at,
-            :received_at, :payload_json, :payload_hash, :is_duplicate, :created_at
-        )'
-    );
-
-    $insertEvent->execute([
-        ':transaction_id' => $transactionId,
-        ':provider_event_id' => $providerEventId,
-        ':event_type' => $eventType,
-        ':status' => $status,
-        ':occurred_at' => $occurredAt,
-        ':received_at' => $receivedAt,
-        ':payload_json' => $rawBody,
-        ':payload_hash' => $payloadHash,
-        ':is_duplicate' => $dup,
-        ':created_at' => $receivedAt,
-    ]);
-
     $upsertTransaction = $pdo->prepare(
         'INSERT INTO transactions (
             transaction_id, amount, email, payer_name, current_status,
@@ -257,6 +234,29 @@ try {
         ':last_event_at' => $occurredAt,
         ':created_at' => $receivedAt,
         ':updated_at' => $receivedAt,
+    ]);
+
+    $insertEvent = $pdo->prepare(
+        'INSERT INTO webhook_events (
+            transaction_id, provider_event_id, event_type, status, occurred_at,
+            received_at, payload_json, payload_hash, is_duplicate, created_at
+        ) VALUES (
+            :transaction_id, :provider_event_id, :event_type, :status, :occurred_at,
+            :received_at, :payload_json, :payload_hash, :is_duplicate, :created_at
+        )'
+    );
+
+    $insertEvent->execute([
+        ':transaction_id' => $transactionId,
+        ':provider_event_id' => $providerEventId,
+        ':event_type' => $eventType,
+        ':status' => $status,
+        ':occurred_at' => $occurredAt,
+        ':received_at' => $receivedAt,
+        ':payload_json' => $rawBody,
+        ':payload_hash' => $payloadHash,
+        ':is_duplicate' => $dup,
+        ':created_at' => $receivedAt,
     ]);
 
     $pdo->commit();
