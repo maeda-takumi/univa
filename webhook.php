@@ -237,7 +237,7 @@ try {
     ]);
 
     $insertEvent = $pdo->prepare(
-        'INSERT INTO webhook_events (
+        'INSERT OR IGNORE INTO webhook_events (
             transaction_id, provider_event_id, event_type, status, occurred_at,
             received_at, payload_json, payload_hash, is_duplicate, created_at
         ) VALUES (
@@ -259,6 +259,10 @@ try {
         ':created_at' => $receivedAt,
     ]);
 
+    if ($insertEvent->rowCount() === 0) {
+        $dup = 1;
+    }
+    
     $pdo->commit();
 
     write_log('info', 'webhook_processed', [
