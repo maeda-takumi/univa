@@ -57,6 +57,7 @@ function ensure_schema(PDO $pdo): void
         "CREATE TABLE IF NOT EXISTS webhook_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             transaction_id TEXT NOT NULL,
+            transaction_token_id TEXT,
             provider_event_id TEXT,
             event_type TEXT,
             status TEXT,
@@ -69,10 +70,40 @@ function ensure_schema(PDO $pdo): void
             FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id)
         )"
     );
+    $columns = $pdo->query("PRAGMA table_info('webhook_events')")->fetchAll(PDO::FETCH_ASSOC);
+    $hasTransactionTokenId = false;
+    foreach ($columns as $column) {
+        if (($column['name'] ?? null) === 'transaction_token_id') {
+            $hasTransactionTokenId = true;
+            break;
+        }
+    }
+    if (!$hasTransactionTokenId) {
+        $pdo->exec('ALTER TABLE webhook_events ADD COLUMN transaction_token_id TEXT');
+    }
+
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webhook_events_transaction_id ON webhook_events(transaction_id)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_webhook_events_occurred_at ON webhook_events(occurred_at)');
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS uq_webhook_events_provider_event_id ON webhook_events(provider_event_id) WHERE provider_event_id IS NOT NULL');
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS uq_webhook_events_payload_hash ON webhook_events(payload_hash) WHERE payload_hash IS NOT NULL');
+}
+
+function detect_event_resource_kind(?string $eventTypeRaw): string
+{
+    $normalized = strtolower(trim((string)$eventTypeRaw));
+    if ($normalized === '') {
+        return 'unknown';
+    }
+
+    if (str_contains($normalized, 'token')) {
+        return 'token';
+    }
+
+    if (str_contains($normalized, 'charge')) {
+        return 'charge';
+    }
+
+    return 'unknown';
 }
 
 function get_nested(array $payload, array $keys): mixed
@@ -217,18 +248,43 @@ try {
         send_json(400, ['ok' => false, 'message' => 'Invalid JSON']);
     }
 
-    $transactionId = first_non_empty([
-        get_nested($payload, ['data', 'id']),
-        $payload['id'] ?? null,
-        get_nested($payload, ['transaction', 'id'])
+    $eventTypeRaw = first_non_empty([
+        $payload['event'] ?? null,
+        get_nested($payload, ['type']),
+        get_nested($payload, ['data', 'event'])
     ]);
+    $resourceKind = detect_event_resource_kind($eventTypeRaw);
+
+    $transactionId = first_non_empty([
+        get_nested($payload, ['transaction', 'id']),
+        get_nested($payload, ['data', 'transaction_id']),
+        get_nested($payload, ['data', 'charge_id']),
+    ]);
+    $transactionTokenId = null;
+    if ($resourceKind === 'charge') {
+        $transactionId = first_non_empty([
+            get_nested($payload, ['data', 'id']),
+            $transactionId,
+        ]);
+    } elseif ($resourceKind === 'token') {
+        $transactionTokenId = first_non_empty([
+            get_nested($payload, ['data', 'id']),
+            get_nested($payload, ['token', 'id']),
+        ]);
+    } else {
+        $transactionId = first_non_empty([
+            $transactionId,
+            get_nested($payload, ['data', 'id']),
+            $payload['id'] ?? null,
+        ]);
+    }
 
     if ($transactionId === null) {
-        write_log('warning', 'transaction_id_not_found', ['payload' => $payload]);
+        write_log('warning', 'transaction_id_not_found', ['payload' => $payload, 'resource_kind' => $resourceKind]);
         send_json(400, ['ok' => false, 'message' => 'transaction_id not found']);
     }
 
-    $statusRaw = pick_from_child_json_first(
+   $statusRaw = pick_from_child_json_first(
         $payload,
         [
             ['data', 'status'],
@@ -237,6 +293,12 @@ try {
         [$payload['status'] ?? null]
     ) ?? 'unknown';
     $status = to_japanese_status($statusRaw) ?? '不明';
+
+    $eventTypeRaw = first_non_empty([
+        $payload['event'] ?? null,
+        get_nested($payload, ['type']),
+        get_nested($payload, ['data', 'event'])
+    ]);
 
     $eventTypeRaw = first_non_empty([
         $payload['event'] ?? null,
@@ -338,17 +400,17 @@ try {
 
     $insertEvent = $pdo->prepare(
         'INSERT OR IGNORE INTO webhook_events (
-            transaction_id, provider_event_id, event_type, status, occurred_at,
+            transaction_id, transaction_token_id, provider_event_id, event_type, status, occurred_at,
             received_at, payload_json, payload_hash, is_duplicate, created_at
         ) VALUES (
-            :transaction_id, :provider_event_id, :event_type, :status, :occurred_at,
+            :transaction_id, :transaction_token_id, :provider_event_id, :event_type, :status, :occurred_at,
             :received_at, :payload_json, :payload_hash, :is_duplicate, :created_at
         )'
     );
 
     $insertEvent->execute([
         ':transaction_id' => $transactionId,
-        ':provider_event_id' => $providerEventId,
+        ':transaction_token_id' => $transactionTokenId,
         ':event_type' => $eventType,
         ':status' => $status,
         ':occurred_at' => $occurredAt,
@@ -367,6 +429,7 @@ try {
 
     write_log('info', 'webhook_processed', [
         'transaction_id' => $transactionId,
+        'transaction_token_id' => $transactionTokenId,
         'status' => $status,
         'event_type' => $eventType,
         'provider_event_id' => $providerEventId,
