@@ -8,6 +8,50 @@ function h(?string $value): string
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
 
+function to_japanese_status(?string $status): ?string
+{
+    if ($status === null) {
+        return null;
+    }
+
+    $normalized = strtolower(trim($status));
+    $map = [
+        'pending' => '保留',
+        'authorized' => '与信済み',
+        'captured' => '売上確定',
+        'succeeded' => '成功',
+        'failed' => '失敗',
+        'error' => 'エラー',
+        'canceled' => 'キャンセル',
+        'cancelled' => 'キャンセル',
+        'refunded' => '返金済み',
+        'chargeback' => 'チャージバック',
+        'unknown' => '不明',
+    ];
+
+    return $map[$normalized] ?? $status;
+}
+
+function to_japanese_event_type(?string $eventType): ?string
+{
+    if ($eventType === null) {
+        return null;
+    }
+
+    $normalized = strtolower(trim($eventType));
+    $map = [
+        'payment.created' => '決済作成',
+        'payment.updated' => '決済更新',
+        'payment.succeeded' => '決済成功',
+        'payment.failed' => '決済失敗',
+        'payment.canceled' => '決済キャンセル',
+        'payment.cancelled' => '決済キャンセル',
+        'payment.refunded' => '返金完了',
+    ];
+
+    return $map[$normalized] ?? $eventType;
+}
+
 $transactions = [];
 $error = null;
 
@@ -16,7 +60,7 @@ try {
     $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
     $transactionsStmt = $pdo->query(
-        'SELECT transaction_id, amount, email, payer_name, current_status, first_seen_at, last_seen_at
+        'SELECT transaction_id, amount, email, payer_name, current_status, first_seen_at, last_seen_at, last_event_at
          FROM transactions
          ORDER BY last_seen_at DESC, first_seen_at DESC'
     );
@@ -54,12 +98,14 @@ include __DIR__ . '/header.php';
             <?php foreach ($transactions as $tx): ?>
                 <li class="tx-item">
                     <button class="tx-parent" type="button" aria-expanded="false">
-                        <span>
-                            <strong><?= h($tx['transaction_id']) ?></strong>
-                            <small><?= h($tx['email'] ?? '-') ?> / <?= h($tx['payer_name'] ?? '-') ?></small>
+                        <span class="tx-main">
+                            <strong class="tx-name"><?= h($tx['payer_name'] ?? '-') ?></strong>
+                            <small class="tx-email"><?= h($tx['email'] ?? '-') ?></small>
+                            <small class="tx-id">ID: <?= h($tx['transaction_id']) ?></small>
                         </span>
                         <span class="tx-meta">
-                            <em class="status status-<?= h((string)$tx['current_status']) ?>"><?= h($tx['current_status']) ?></em>
+                            <small class="tx-event-date">イベント日: <?= h($tx['last_event_at'] ?: $tx['last_seen_at']) ?></small>
+                            <em class="status status-<?= h((string)$tx['current_status']) ?>"><?= h(to_japanese_status($tx['current_status']) ?? '不明') ?></em>
                             <b>¥<?= number_format((int)($tx['amount'] ?? 0)) ?></b>
                         </span>
                     </button>
@@ -72,8 +118,8 @@ include __DIR__ . '/header.php';
                                 <?php foreach ($tx['events'] as $ev): ?>
                                     <li class="event-item">
                                         <div>
-                                            <strong><?= h($ev['event_type'] ?: 'unknown') ?></strong>
-                                            <small><?= h($ev['status'] ?: 'unknown') ?></small>
+                                            <strong><?= h(to_japanese_event_type($ev['event_type']) ?: '不明') ?></strong>
+                                            <small><?= h(to_japanese_status($ev['status']) ?: '不明') ?></small>
                                         </div>
                                         <time><?= h($ev['occurred_at'] ?: $ev['received_at']) ?></time>
                                     </li>
