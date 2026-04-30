@@ -6,6 +6,29 @@ const DB_FILE = DB_DIR . '/payments.sqlite';
 
 const EXPECTED_AUTHORIZATION = '';
 
+const LOG_FILE = DB_DIR . '/webhook.log';
+
+function write_log(string $level, string $message, array $context = []): void
+{
+    if (!is_dir(DB_DIR)) {
+        mkdir(DB_DIR, 0775, true);
+    }
+
+    $record = [
+        'time' => now_utc(),
+        'level' => $level,
+        'message' => $message,
+        'context' => $context,
+    ];
+
+    $line = json_encode($record, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($line === false) {
+        $line = sprintf('{"time":"%s","level":"error","message":"log_encode_failed"}', now_utc());
+    }
+
+    file_put_contents(LOG_FILE, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
+}
+
 function send_json(int $status, array $payload): void
 {
     http_response_code($status);
@@ -88,22 +111,26 @@ if (!is_dir(DB_DIR)) {
 
 try {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+        write_log('warning', 'invalid_method', ['method' => $_SERVER['REQUEST_METHOD'] ?? null]);
         send_json(405, ['ok' => false, 'message' => 'POST only']);
     }
 
     $headers = getallheaders() ?: [];
     $auth = $headers['Authorization'] ?? $headers['authorization'] ?? '';
     if (EXPECTED_AUTHORIZATION !== '' && $auth !== EXPECTED_AUTHORIZATION) {
+        write_log('warning', 'unauthorized', ['has_auth_header' => $auth !== '']);
         send_json(401, ['ok' => false, 'message' => 'Unauthorized']);
     }
 
     $rawBody = file_get_contents('php://input');
     if ($rawBody === false || trim($rawBody) === '') {
+        write_log('warning', 'invalid_json', ['raw_body' => $rawBody]);
         send_json(400, ['ok' => false, 'message' => 'Empty body']);
     }
 
     $payload = json_decode($rawBody, true);
     if (!is_array($payload)) {
+        write_log('warning', 'invalid_json', ['raw_body' => $rawBody]);
         send_json(400, ['ok' => false, 'message' => 'Invalid JSON']);
     }
 
@@ -114,6 +141,7 @@ try {
     ]);
 
     if ($transactionId === null) {
+        write_log('warning', 'transaction_id_not_found', ['payload' => $payload]);
         send_json(400, ['ok' => false, 'message' => 'transaction_id not found']);
     }
 
@@ -233,6 +261,14 @@ try {
 
     $pdo->commit();
 
+    write_log('info', 'webhook_processed', [
+        'transaction_id' => $transactionId,
+        'status' => $status,
+        'event_type' => $eventType,
+        'provider_event_id' => $providerEventId,
+        'is_duplicate' => $dup === 1,
+    ]);
+
     send_json(200, [
         'ok' => true,
         'transaction_id' => $transactionId,
@@ -243,5 +279,9 @@ try {
     if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
         $pdo->rollBack();
     }
+    write_log('error', 'webhook_processing_failed', [
+        'error' => $e->getMessage(),
+        'trace' => $e->getTraceAsString(),
+    ]);
     send_json(500, ['ok' => false, 'message' => 'Internal Server Error', 'error' => $e->getMessage()]);
 }
