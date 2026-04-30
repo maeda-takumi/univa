@@ -1,29 +1,16 @@
 document.addEventListener('DOMContentLoaded', () => {
-    const appShell = document.querySelector('.app-shell');
-    const menuToggle = document.getElementById('menuToggle');
-    const sidebarOverlay = document.getElementById('sidebarOverlay');
+    const parents = document.querySelectorAll('.tx-parent');
 
-    if (!appShell || !menuToggle || !sidebarOverlay) {
-        return;
-    }
+    parents.forEach((button) => {
+        button.addEventListener('click', () => {
+            const panel = button.nextElementSibling;
+            if (!(panel instanceof HTMLElement)) {
+                return;
+            }
 
-    const syncExpanded = () => {
-        const isOpen = appShell.classList.contains('sidebar-open');
-        menuToggle.setAttribute('aria-expanded', String(isOpen));
-    };
-
-    const toggleSidebar = () => {
-        appShell.classList.toggle('sidebar-open');
-        syncExpanded();
-    };
-
-    const closeSidebar = () => {
-        appShell.classList.remove('sidebar-open');
-        syncExpanded();
-    };
-
-    menuToggle.addEventListener('click', toggleSidebar);
-    sidebarOverlay.addEventListener('click', closeSidebar);
-
-    syncExpanded();
+            const isExpanded = button.getAttribute('aria-expanded') === 'true';
+            button.setAttribute('aria-expanded', String(!isExpanded));
+            panel.hidden = isExpanded;
+        });
+    });
 });
