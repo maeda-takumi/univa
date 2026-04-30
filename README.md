@@ -5,7 +5,7 @@
 - 子テーブル: `webhook_events`（Webhook受信履歴）
 
 ## 仕様
-- 親の `current_status` は「最後に受信した子データの status」を採用。
+- 親に採用する値は `amount`, `email`, `payer_name`。子データの `payload_json` 内の値を最優先で採用。
 - 親に採用する値は `amount`, `email`, `payer_name`。
 - 子には `payload_json` をそのまま保存。
 

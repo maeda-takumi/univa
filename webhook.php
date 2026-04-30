@@ -100,6 +100,16 @@ function first_non_empty(array $values): ?string
     }
     return null;
 }
+function pick_from_child_json_first(array $payload, array $childJsonPaths, array $fallbackValues = []): ?string
+{
+    $childValues = [];
+    foreach ($childJsonPaths as $path) {
+        $childValues[] = get_nested($payload, $path);
+    }
+
+    return first_non_empty(array_merge($childValues, $fallbackValues));
+}
+
 function now_utc(): string
 {
     return (new DateTimeImmutable('now', new DateTimeZone('UTC')))->format('Y-m-d H:i:s');
@@ -145,11 +155,14 @@ try {
         send_json(400, ['ok' => false, 'message' => 'transaction_id not found']);
     }
 
-    $status = first_non_empty([
-        get_nested($payload, ['data', 'status']),
-        get_nested($payload, ['transaction', 'status']),
-        $payload['status'] ?? null,
-    ]) ?? 'unknown';
+    $status = pick_from_child_json_first(
+        $payload,
+        [
+            ['data', 'status'],
+            ['transaction', 'status'],
+        ],
+        [$payload['status'] ?? null]
+    ) ?? 'unknown';
 
     $eventType = first_non_empty([
         $payload['event'] ?? null,
@@ -163,25 +176,35 @@ try {
         get_nested($payload, ['occurred_at'])
     ]);
 
-    $amountRaw = first_non_empty([
-        get_nested($payload, ['data', 'amount']),
-        get_nested($payload, ['data', 'charged_amount']),
-        $payload['amount'] ?? null
-    ]);
+    $amountRaw = pick_from_child_json_first(
+        $payload,
+        [
+            ['data', 'amount'],
+            ['data', 'charged_amount'],
+        ],
+        [$payload['amount'] ?? null]
+    );
     $amount = ($amountRaw !== null && is_numeric($amountRaw)) ? (int)$amountRaw : null;
 
-    $email = first_non_empty([
-        get_nested($payload, ['data', 'email']),
-        get_nested($payload, ['customer', 'email']),
-        $payload['email'] ?? null,
-    ]);
+    $email = pick_from_child_json_first(
+        $payload,
+        [
+            ['data', 'email'],
+            ['customer', 'email'],
+        ],
+        [$payload['email'] ?? null]
+    );
 
-    $payerName = first_non_empty([
-        get_nested($payload, ['data', 'metadata', 'univapay-name']),
-        get_nested($payload, ['data', 'metadata', 'name']),
-        get_nested($payload, ['customer', 'name']),
-        $payload['name'] ?? null,
-    ]);
+    $payerName = pick_from_child_json_first(
+        $payload,
+        [
+            ['data', 'metadata', 'univapay-name'],
+            ['data', 'metadata', 'name'],
+            ['customer', 'name'],
+        ],
+        [$payload['name'] ?? null]
+    );
+    
     $providerEventId = first_non_empty([
         $payload['id'] ?? null,
         get_nested($payload, ['event_id'])
@@ -262,7 +285,7 @@ try {
     if ($insertEvent->rowCount() === 0) {
         $dup = 1;
     }
-    
+
     $pdo->commit();
 
     write_log('info', 'webhook_processed', [
