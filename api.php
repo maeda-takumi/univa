@@ -7,14 +7,127 @@ $jwt    = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhcHBfdG9rZW4iLCJpYXQi
 $baseUrl = 'https://api.univapay.com/transaction_history';
 
 $dbPath = __DIR__ . '/univapay_transaction_history.sqlite';
+$configPath = __DIR__ . '/config.php';
 
 $startDate = $_POST['start_date'] ?? gmdate('Y-m-01');
 $endDate = $_POST['end_date'] ?? gmdate('Y-m-d');
 $message = null;
 $error = null;
 $isSubmitted = $_SERVER['REQUEST_METHOD'] === 'POST';
+$sheetImportedMessage = null;
 
-if ($isSubmitted) {
+
+function normalizeSheetValue($value): ?string
+{
+    if ($value === null) {
+        return null;
+    }
+    $trimmed = trim((string)$value);
+    return $trimmed === '' ? null : $trimmed;
+}
+
+function fetchSheetRows(array $sheetConfig): array
+{
+    if (empty($sheetConfig['spreadsheet_id']) || empty($sheetConfig['sheet_name']) || empty($sheetConfig['api_key'])) {
+        throw new RuntimeException('config.php のシート設定が不足しています。');
+    }
+
+    $range = rawurlencode($sheetConfig['sheet_name'] . '!A1:AG');
+    $url = sprintf(
+        'https://sheets.googleapis.com/v4/spreadsheets/%s/values/%s?majorDimension=ROWS&key=%s',
+        rawurlencode($sheetConfig['spreadsheet_id']),
+        $range,
+        rawurlencode($sheetConfig['api_key'])
+    );
+
+    $response = file_get_contents($url);
+    if ($response === false) {
+        throw new RuntimeException('Google Sheets API の取得に失敗しました。');
+    }
+
+    $decoded = json_decode($response, true);
+    if (!is_array($decoded)) {
+        throw new RuntimeException('Google Sheets API のレスポンス解析に失敗しました。');
+    }
+
+    return $decoded['values'] ?? [];
+}
+
+if ($isSubmitted && (($_POST['action'] ?? '') === 'import_sheet')) {
+    try {
+        if (!file_exists($configPath)) {
+            throw new RuntimeException('config.php が見つかりません。');
+        }
+        $config = require $configPath;
+        $sheetConfig = $config['google_sheet'] ?? [];
+        $rows = fetchSheetRows($sheetConfig);
+
+        $pdo = new PDO('sqlite:' . $dbPath);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS spreadsheet_imports (
+                id TEXT PRIMARY KEY,
+                serial_number TEXT,
+                sales_year_month TEXT,
+                payment_year_month TEXT,
+                real_name TEXT,
+                system_name TEXT,
+                entry_point TEXT,
+                state TEXT,
+                line_name TEXT,
+                phone_number TEXT,
+                email TEXT,
+                sales_date TEXT,
+                payment_date TEXT,
+                expected_payment_amount TEXT,
+                payment_amount TEXT,
+                payment_count TEXT,
+                login_id TEXT,
+                payment_destination TEXT,
+                video_person_in_charge TEXT,
+                sales_person_in_charge TEXT,
+                acquisition_channel TEXT,
+                age TEXT,
+                system_delivery_status TEXT,
+                remarks TEXT,
+                payment_week TEXT,
+                data1 TEXT,
+                data2 TEXT,
+                line_registration_date TEXT,
+                gender TEXT,
+                data3 TEXT,
+                data4 TEXT,
+                data5 TEXT,
+                data6 TEXT,
+                imported_at TEXT
+            )'
+        );
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO spreadsheet_imports (
+                id, serial_number, sales_year_month, payment_year_month, real_name, system_name, entry_point, state, line_name, phone_number, email, sales_date, payment_date, expected_payment_amount, payment_amount, payment_count, login_id, payment_destination, video_person_in_charge, sales_person_in_charge, acquisition_channel, age, system_delivery_status, remarks, payment_week, data1, data2, line_registration_date, gender, data3, data4, data5, data6, imported_at
+            ) VALUES (
+                :id, :serial_number, :sales_year_month, :payment_year_month, :real_name, :system_name, :entry_point, :state, :line_name, :phone_number, :email, :sales_date, :payment_date, :expected_payment_amount, :payment_amount, :payment_count, :login_id, :payment_destination, :video_person_in_charge, :sales_person_in_charge, :acquisition_channel, :age, :system_delivery_status, :remarks, :payment_week, :data1, :data2, :line_registration_date, :gender, :data3, :data4, :data5, :data6, :imported_at
+            ) ON CONFLICT(id) DO UPDATE SET
+                serial_number=excluded.serial_number, sales_year_month=excluded.sales_year_month, payment_year_month=excluded.payment_year_month, real_name=excluded.real_name, system_name=excluded.system_name, entry_point=excluded.entry_point, state=excluded.state, line_name=excluded.line_name, phone_number=excluded.phone_number, email=excluded.email, sales_date=excluded.sales_date, payment_date=excluded.payment_date, expected_payment_amount=excluded.expected_payment_amount, payment_amount=excluded.payment_amount, payment_count=excluded.payment_count, login_id=excluded.login_id, payment_destination=excluded.payment_destination, video_person_in_charge=excluded.video_person_in_charge, sales_person_in_charge=excluded.sales_person_in_charge, acquisition_channel=excluded.acquisition_channel, age=excluded.age, system_delivery_status=excluded.system_delivery_status, remarks=excluded.remarks, payment_week=excluded.payment_week, data1=excluded.data1, data2=excluded.data2, line_registration_date=excluded.line_registration_date, gender=excluded.gender, data3=excluded.data3, data4=excluded.data4, data5=excluded.data5, data6=excluded.data6, imported_at=excluded.imported_at'
+        );
+
+        $imported = 0;
+        foreach ($rows as $row) {
+            $id = normalizeSheetValue($row[0] ?? null);
+            if ($id === null) {
+                continue;
+            }
+            $stmt->execute([
+                ':id' => $id, ':serial_number' => normalizeSheetValue($row[1] ?? null), ':sales_year_month' => normalizeSheetValue($row[2] ?? null), ':payment_year_month' => normalizeSheetValue($row[3] ?? null), ':real_name' => normalizeSheetValue($row[4] ?? null), ':system_name' => normalizeSheetValue($row[5] ?? null), ':entry_point' => normalizeSheetValue($row[6] ?? null), ':state' => normalizeSheetValue($row[7] ?? null), ':line_name' => normalizeSheetValue($row[8] ?? null), ':phone_number' => normalizeSheetValue($row[9] ?? null), ':email' => normalizeSheetValue($row[10] ?? null), ':sales_date' => normalizeSheetValue($row[11] ?? null), ':payment_date' => normalizeSheetValue($row[12] ?? null), ':expected_payment_amount' => normalizeSheetValue($row[13] ?? null), ':payment_amount' => normalizeSheetValue($row[14] ?? null), ':payment_count' => normalizeSheetValue($row[15] ?? null), ':login_id' => normalizeSheetValue($row[16] ?? null), ':payment_destination' => normalizeSheetValue($row[17] ?? null), ':video_person_in_charge' => normalizeSheetValue($row[18] ?? null), ':sales_person_in_charge' => normalizeSheetValue($row[19] ?? null), ':acquisition_channel' => normalizeSheetValue($row[20] ?? null), ':age' => normalizeSheetValue($row[21] ?? null), ':system_delivery_status' => normalizeSheetValue($row[22] ?? null), ':remarks' => normalizeSheetValue($row[23] ?? null), ':payment_week' => normalizeSheetValue($row[24] ?? null), ':data1' => normalizeSheetValue($row[25] ?? null), ':data2' => normalizeSheetValue($row[26] ?? null), ':line_registration_date' => normalizeSheetValue($row[27] ?? null), ':gender' => normalizeSheetValue($row[28] ?? null), ':data3' => normalizeSheetValue($row[29] ?? null), ':data4' => normalizeSheetValue($row[30] ?? null), ':data5' => normalizeSheetValue($row[31] ?? null), ':data6' => normalizeSheetValue($row[32] ?? null), ':imported_at' => gmdate('c'),
+            ]);
+            $imported++;
+        }
+        $sheetImportedMessage = "スプレッドシート取込完了: {$imported}件";
+    } catch (Throwable $e) {
+        $error = 'スプレッドシート取込エラー: ' . $e->getMessage();
+    }
+} elseif ($isSubmitted) {
     $start = DateTime::createFromFormat('Y-m-d', $startDate, new DateTimeZone('UTC'));
     $end = DateTime::createFromFormat('Y-m-d', $endDate, new DateTimeZone('UTC'));
 
@@ -237,6 +350,7 @@ if ($isSubmitted) {
     <h1>UnivaPay 取引履歴取得</h1>
 
     <form method="post" id="fetchForm">
+        <input type="hidden" name="action" value="fetch_univapay">
         <label>
             取得期間(開始)
             <input type="date" name="start_date" value="<?= htmlspecialchars($startDate, ENT_QUOTES, 'UTF-8') ?>" required>
@@ -248,6 +362,10 @@ if ($isSubmitted) {
         </label>
         <button type="submit" id="submitButton">実行</button>
     </form>
+    <form method="post" style="margin-top: 12px;">
+        <input type="hidden" name="action" value="import_sheet">
+        <button type="submit">スプレッドシート取込</button>
+    </form>
 
     <div id="runningStatus" class="status" aria-live="polite"></div>
 
@@ -257,6 +375,9 @@ if ($isSubmitted) {
 
     <?php if ($error): ?>
         <p class="status error show"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></p>
+    <?php endif; ?>
+    <?php if ($sheetImportedMessage): ?>
+        <p class="status success show"><?= htmlspecialchars($sheetImportedMessage, ENT_QUOTES, 'UTF-8') ?></p>
     <?php endif; ?>
     </div>
 
