@@ -230,3 +230,51 @@ h1 { margin: .2rem 0 0; font-size: clamp(1.5rem, 3vw, 2.2rem); }
     display: none;
   }
 }
+
+.status-tabs {
+  display: flex;
+  gap: .5rem;
+  margin: 1rem 0;
+  flex-wrap: wrap;
+}
+.status-tab {
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--muted);
+  padding: .45rem .8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.status-tab.is-active {
+  background: var(--brand);
+  color: #fff;
+  border-color: var(--brand);
+}
+.tab-panel { display: none; }
+.tab-panel.is-active { display: block; }
+.daily-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0;
+  border: 1px solid var(--border);
+}
+.daily-card {
+  border: 1px solid var(--border);
+  border-left: 0;
+  border-top: 0;
+  padding: .95rem;
+  background: var(--surface);
+  border-radius: 0;
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.daily-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 20px rgba(16, 24, 40, 0.16);
+  position: relative;
+  z-index: 1;
+}
+.daily-card h3 { margin: 0 0 .8rem; font-size: 1rem; }
+.daily-card dl { margin: 0; display: grid; gap: .35rem; }
+.daily-card div { display: flex; justify-content: space-between; gap: .5rem; }
+.daily-card dt { color: var(--muted); }
+.daily-card dd { margin: 0; font-weight: 700; }
