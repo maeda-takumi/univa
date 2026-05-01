@@ -52,6 +52,49 @@ foreach ($dbFiles as $file) {
         continue;
     }
 }
+
+$records = array_values(array_filter($records, static function (array $record) use ($filters): bool {
+    $recordDateRaw = trim((string)($record['created_on'] ?? ''));
+    $recordDate = $recordDateRaw !== '' ? strtotime($recordDateRaw) : false;
+
+    if ($filters['date_from'] !== '') {
+        $from = strtotime($filters['date_from'] . ' 00:00:00');
+        if ($from !== false && ($recordDate === false || $recordDate < $from)) {
+            return false;
+        }
+    }
+
+    if ($filters['date_to'] !== '') {
+        $to = strtotime($filters['date_to'] . ' 23:59:59');
+        if ($to !== false && ($recordDate === false || $recordDate > $to)) {
+            return false;
+        }
+    }
+
+    if ($filters['status'] !== '' && (string)$record['status'] !== $filters['status']) {
+        return false;
+    }
+
+    if ($filters['payment_type'] !== '' && (string)$record['payment_type'] !== $filters['payment_type']) {
+        return false;
+    }
+
+    if ($filters['name'] !== '') {
+        $name = mb_strtolower((string)($record['metadata_name'] ?? ''));
+        if (!str_contains($name, mb_strtolower($filters['name']))) {
+            return false;
+        }
+    }
+
+    if ($filters['email'] !== '') {
+        $email = mb_strtolower((string)($record['cardholder_email'] ?? ''));
+        if (!str_contains($email, mb_strtolower($filters['email']))) {
+            return false;
+        }
+    }
+
+    return true;
+}));
 include __DIR__ . '/header.php';
 
 function formatDate(string $value): string

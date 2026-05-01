@@ -43,6 +43,38 @@ h1 { margin: .2rem 0 0; font-size: clamp(1.5rem, 3vw, 2.2rem); }
   color: #fff;
   box-shadow: var(--shadow);
 }
+.hamburger-btn {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  font-size: 1.4rem;
+  padding: .45rem .7rem;
+  cursor: pointer;
+}
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: -280px;
+  width: 280px;
+  height: 100vh;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  z-index: 20;
+  transition: left .25s ease;
+  padding: 1rem;
+}
+.sidebar.is-open { left: 0; }
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(2,6,23,.42);
+  z-index: 19;
+  display: none;
+}
+.sidebar-backdrop.is-open { display: block; }
+.sidebar-head { display:flex; justify-content:space-between; align-items:center; }
+.sidebar-nav { display:grid; gap:.8rem; margin-top:1rem; }
+.sidebar-nav a { color: var(--text); text-decoration:none; font-weight: 600; }
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -50,6 +82,23 @@ h1 { margin: .2rem 0 0; font-size: clamp(1.5rem, 3vw, 2.2rem); }
   box-shadow: var(--shadow);
   padding: 1.2rem;
 }
+.filter-form {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: .9rem;
+}
+.filter-form label { display:block; font-size:.9rem; color:var(--muted); margin-bottom:.3rem; }
+.filter-form input,
+.filter-form select {
+  width: 100%;
+  padding: .55rem .65rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: inherit;
+  background: #fff;
+}
+.filter-form a { color: var(--muted); margin-left: .5rem; text-decoration: none; }
 .panel-head { display: flex; justify-content: space-between; align-items: center; }
 .count { color: var(--muted); font-weight: 600; }
 .db-grid {
@@ -74,7 +123,7 @@ h1 { margin: .2rem 0 0; font-size: clamp(1.5rem, 3vw, 2.2rem); }
 .hint { font-size: .92rem; }
 
 .modal {
-  position: fixed; inset: 0; display: none;
+  position: fixed; inset: 0; display: none;z-index: 10;
 }
 .modal.is-open { display: block; }
 .modal-overlay { position: absolute; inset: 0; background: rgba(2, 6, 23, .56); backdrop-filter: blur(3px); }
@@ -97,6 +146,7 @@ h1 { margin: .2rem 0 0; font-size: clamp(1.5rem, 3vw, 2.2rem); }
 
 @media (max-width: 640px) {
   .header-inner { flex-direction: column; align-items: flex-start; }
+  #importButton { display: none; }
 }
 
 

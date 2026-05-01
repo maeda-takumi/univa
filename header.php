@@ -7,8 +7,22 @@
   <link rel="stylesheet" href="style/style.css?v=<?= time(); ?>">
 </head>
 <body>
+  <div id="sidebarBackdrop" class="sidebar-backdrop" data-close-sidebar></div>
+  <aside id="sidebar" class="sidebar" aria-hidden="true">
+    <div class="sidebar-head">
+      <h2>メニュー</h2>
+      <button type="button" class="icon-btn" data-close-sidebar aria-label="閉じる">×</button>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="index.php">取引一覧</a>
+      <button id="importButtonSidebar" class="btn btn-primary" type="button">データをインポート</button>
+    </nav>
+  </aside>
   <header class="site-header">
     <div class="container header-inner">
+      <button id="menuButton" class="hamburger-btn" type="button" aria-label="メニューを開く" aria-controls="sidebar" aria-expanded="false">
+        ☰
+      </button>
       <div>
         <p class="eyebrow">Database Manager</p>
         <h1>DBファイル一覧</h1>
