@@ -185,8 +185,8 @@ function labelPaymentType(string $paymentType): string
       <input type="text" id="email" name="email" value="<?= htmlspecialchars($filters['email'], ENT_QUOTES, 'UTF-8'); ?>">
     </div>
     <div>
-      <button type="submit">絞り込む</button>
-      <a href="index.php">リセット</a>
+      <button type="submit" class="action-btn action-btn-primary">実行</button>
+      <a href="index.php" class="action-btn action-btn-reset">リセット</a>
     </div>
   </form>
   <?php if (empty($records)): ?>

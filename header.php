@@ -15,7 +15,7 @@
     </div>
     <nav class="sidebar-nav">
       <a href="index.php">取引一覧</a>
-      <button id="importButtonSidebar" class="btn btn-primary" type="button">データをインポート</button>
+      <a href="calc.php">集計</a>
     </nav>
   </aside>
   <header class="site-header">
