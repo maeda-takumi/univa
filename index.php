@@ -99,45 +99,6 @@ function labelPaymentType(string $paymentType): string
         default => $paymentType,
     };
 }
-
-function isMatchedRecord(array $record, array $filters): bool
-{
-    if ($filters['date_from'] !== '') {
-        $recordTimestamp = strtotime((string)$record['created_on']);
-        $fromTimestamp = strtotime($filters['date_from'] . ' 00:00:00');
-        if ($recordTimestamp === false || $fromTimestamp === false || $recordTimestamp < $fromTimestamp) {
-            return false;
-        }
-    }
-
-    if ($filters['date_to'] !== '') {
-        $recordTimestamp = strtotime((string)$record['created_on']);
-        $toTimestamp = strtotime($filters['date_to'] . ' 23:59:59');
-        if ($recordTimestamp === false || $toTimestamp === false || $recordTimestamp > $toTimestamp) {
-            return false;
-        }
-    }
-
-    if ($filters['status'] !== '' && (string)$record['status'] !== $filters['status']) {
-        return false;
-    }
-
-    if ($filters['payment_type'] !== '' && (string)$record['payment_type'] !== $filters['payment_type']) {
-        return false;
-    }
-
-    if ($filters['name'] !== '' && stripos((string)$record['metadata_name'], $filters['name']) === false) {
-        return false;
-    }
-
-    if ($filters['email'] !== '' && stripos((string)$record['cardholder_email'], $filters['email']) === false) {
-        return false;
-    }
-
-    return true;
-}
-
-$records = array_values(array_filter($records, static fn(array $record): bool => isMatchedRecord($record, $filters)));
 ?>
 
 <section class="panel">
