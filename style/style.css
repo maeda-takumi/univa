@@ -98,3 +98,49 @@ h1 { margin: .2rem 0 0; font-size: clamp(1.5rem, 3vw, 2.2rem); }
 @media (max-width: 640px) {
   .header-inner { flex-direction: column; align-items: flex-start; }
 }
+
+
+.list-scroll {
+  margin-top: 1rem;
+  max-height: 65vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+.transaction-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.transaction-item {
+  display: grid;
+  grid-template-columns: 1.2fr .8fr .9fr 1fr 1.4fr;
+  gap: .8rem;
+  padding: .8rem 1rem;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+  background: var(--surface);
+}
+.transaction-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.transaction-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-soft);
+  font-weight: 700;
+}
+.transaction-list .transaction-item:last-child {
+  border-bottom: none;
+}
+@media (max-width: 860px) {
+  .transaction-item {
+    grid-template-columns: 1fr;
+    gap: .35rem;
+  }
+  .transaction-head {
+    display: none;
+  }
+}
