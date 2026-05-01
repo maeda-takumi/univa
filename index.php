@@ -1,5 +1,5 @@
 <?php
-$dbFiles = glob(__DIR__ . '/*.db') ?: [];
+$dbFiles = glob(__DIR__ . '/*.sqlite') ?: [];
 include __DIR__ . '/header.php';
 ?>
 
@@ -11,7 +11,7 @@ include __DIR__ . '/header.php';
 
   <?php if (empty($dbFiles)): ?>
     <div class="empty-state">
-      <p>このディレクトリに .db ファイルは見つかりませんでした。</p>
+      <p>このディレクトリに .sqlite ファイルは見つかりませんでした。</p>
       <p class="hint">インポートボタンからデータ登録を行ってください。</p>
     </div>
   <?php else: ?>

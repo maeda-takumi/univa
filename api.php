@@ -12,8 +12,9 @@ $startDate = $_POST['start_date'] ?? gmdate('Y-m-01');
 $endDate = $_POST['end_date'] ?? gmdate('Y-m-d');
 $message = null;
 $error = null;
+$isSubmitted = $_SERVER['REQUEST_METHOD'] === 'POST';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($isSubmitted) {
     $start = DateTime::createFromFormat('Y-m-d', $startDate, new DateTimeZone('UTC'));
     $end = DateTime::createFromFormat('Y-m-d', $endDate, new DateTimeZone('UTC'));
 
@@ -210,11 +211,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <title>UnivaPay 取引履歴取得</title>
+    <style>
+        body { font-family: "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif; background:#f5f7fb; color:#1f2937; margin:0; padding:24px; }
+        .container { max-width:760px; margin:0 auto; background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:24px; box-shadow:0 8px 24px rgba(15,23,42,.06); }
+        h1 { margin-top:0; font-size:24px; }
+        .description { color:#4b5563; margin-bottom:18px; }
+        form { display:grid; gap:14px; }
+        label { display:grid; gap:6px; font-weight:600; }
+        input[type="date"] { padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; font-size:14px; }
+        button { background:#2563eb; color:#fff; border:none; border-radius:8px; padding:11px 18px; font-weight:700; width:140px; cursor:pointer; }
+        button:disabled { background:#93c5fd; cursor:wait; }
+        .status { margin-top:16px; padding:12px 14px; border-radius:8px; display:none; font-weight:600; }
+        .status.show { display:block; }
+        .status.running { background:#eff6ff; border:1px solid #93c5fd; color:#1d4ed8; }
+        .status.success { background:#ecfdf5; border:1px solid #86efac; color:#166534; }
+        .status.error { background:#fef2f2; border:1px solid #fca5a5; color:#b91c1c; }
+    </style>
 </head>
 <body>
+    <div class="container">
+    <h1>UnivaPay 取引履歴取得</h1>
+    <p class="description">期間を指定して実行すると、API取得結果をSQLiteへ保存します。</p>
     <h1>UnivaPay 取引履歴取得</h1>
 
-    <form method="post">
+    <form method="post" id="fetchForm">
         <label>
             取得期間(開始)
             <input type="date" name="start_date" value="<?= htmlspecialchars($startDate, ENT_QUOTES, 'UTF-8') ?>" required>
@@ -224,16 +244,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             取得期間(終了)
             <input type="date" name="end_date" value="<?= htmlspecialchars($endDate, ENT_QUOTES, 'UTF-8') ?>" required>
         </label>
-        <br><br>
-        <button type="submit">実行</button>
+        <button type="submit" id="submitButton">実行</button>
     </form>
 
+    <div id="runningStatus" class="status" aria-live="polite"></div>
+
     <?php if ($message): ?>
-        <p style="color: green;"><?= htmlspecialchars($message, ENT_QUOTES, 'UTF-8') ?></p>
+        <p class="status success show"><?= htmlspecialchars($message, ENT_QUOTES, 'UTF-8') ?></p>
     <?php endif; ?>
 
     <?php if ($error): ?>
-        <p style="color: red;"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></p>
+        <p class="status error show"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></p>
     <?php endif; ?>
+    </div>
+
+    <script>
+        const form = document.getElementById('fetchForm');
+        const submitButton = document.getElementById('submitButton');
+        const runningStatus = document.getElementById('runningStatus');
+
+        form.addEventListener('submit', () => {
+            runningStatus.textContent = '実行中です... API取得とDB保存が完了するまでお待ちください。';
+            runningStatus.className = 'status running show';
+            submitButton.disabled = true;
+            submitButton.textContent = '実行中...';
+        });
+    </script>
 </body>
 </html>
