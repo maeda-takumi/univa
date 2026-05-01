@@ -111,6 +111,7 @@ if ($isSubmitted) {
                         store_id TEXT,
                         store_name TEXT,
                         merchant_name TEXT,
+                        db_id TEXT,
                         raw_json TEXT,
                         updated_at TEXT
                     )'
@@ -122,7 +123,7 @@ if ($isSubmitted) {
                         payment_type, charge_type, bank_transfer_payment_status, bank_transfer_latest_deposit_date,
                         cardholder_name, cardholder_email, brand, gateway, service_provider,
                         metadata_name, metadata_phone_number, metadata_link_id,
-                        store_id, store_name, merchant_name, raw_json, updated_at
+                        :store_id, :store_name, :merchant_name, :db_id, :raw_json, :updated_at
                     ) VALUES (
                         :resource_id, :created_on, :charge_id, :type, :status, :amount, :currency,
                         :payment_type, :charge_type, :bank_transfer_payment_status, :bank_transfer_latest_deposit_date,
@@ -190,6 +191,7 @@ if ($isSubmitted) {
                         ':store_id' => $item['store_id'] ?? null,
                         ':store_name' => $item['store_name'] ?? null,
                         ':merchant_name' => $item['merchant_name'] ?? null,
+                        ':db_id' => null,
                         ':raw_json' => json_encode($item, JSON_UNESCAPED_UNICODE),
                         ':updated_at' => $now,
                     ]);

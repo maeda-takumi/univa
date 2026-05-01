@@ -22,7 +22,31 @@ foreach ($dbFiles as $file) {
             continue;
         }
 
-        $stmt = $pdo->query('SELECT created_on, status, payment_type, amount, metadata_name, cardholder_name, cardholder_email FROM ' . $table);
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS spreadsheet_imports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                sheet_row_id TEXT UNIQUE,
+                payload_json TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )'
+        );
+
+        $columnCheck = $pdo->query("PRAGMA table_info({$table})");
+        $hasDbIdColumn = false;
+        if ($columnCheck !== false) {
+            while ($column = $columnCheck->fetch()) {
+                if (($column['name'] ?? '') === 'db_id') {
+                    $hasDbIdColumn = true;
+                    break;
+                }
+            }
+        }
+        if (!$hasDbIdColumn) {
+            $pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN db_id TEXT');
+        }
+
+        $stmt = $pdo->query('SELECT created_on, status, payment_type, amount, metadata_name, cardholder_name, cardholder_email, db_id FROM ' . $table);
 
         while ($row = $stmt->fetch()) {
             $createdOn = trim((string)($row['created_on'] ?? ''));
@@ -47,6 +71,7 @@ foreach ($dbFiles as $file) {
             }
             $email = mb_strtolower(trim((string)($row['cardholder_email'] ?? '')));
 
+            $dbId = trim((string)($row['db_id'] ?? ''));
             $records[] = [
                 'date' => $date,
                 'month' => $month,
@@ -56,6 +81,7 @@ foreach ($dbFiles as $file) {
                 'name' => $name,
                 'email' => $email,
                 'person_key' => $email !== '' ? $email : $name,
+                'db_id' => $dbId,
             ];
         }
     } catch (Throwable $e) {
@@ -104,6 +130,8 @@ foreach ($records as $record) {
             'people' => [],
             'payment_totals' => [],
             'details' => [],
+            'linked_count' => 0,
+            'total_count' => 0,
         ];
     }
 
@@ -113,6 +141,8 @@ foreach ($records as $record) {
             'people' => [],
             'payment_totals' => [],
             'details' => [],
+            'linked_count' => 0,
+            'total_count' => 0,
         ];
     }
 
@@ -131,14 +161,23 @@ foreach ($records as $record) {
     $statuses[$status][$date]['payment_totals'][$paymentType] = ($statuses[$status][$date]['payment_totals'][$paymentType] ?? 0) + 1;
     $allBucket[$date]['payment_totals'][$paymentType] = ($allBucket[$date]['payment_totals'][$paymentType] ?? 0) + 1;
 
+    $isLinked = $record['db_id'] !== '';
     $detail = [
         'name' => $record['name'] !== '' ? $record['name'] : '未設定',
         'email' => $record['email'] !== '' ? $record['email'] : '未設定',
         'amount' => $record['amount'],
         'payment_type' => paymentTypeLabel($record['payment_type']),
+        'is_linked' => $isLinked,
     ];
     $statuses[$status][$date]['details'][] = $detail;
     $allBucket[$date]['details'][] = $detail;
+
+    $statuses[$status][$date]['total_count']++;
+    $allBucket[$date]['total_count']++;
+    if ($isLinked) {
+        $statuses[$status][$date]['linked_count']++;
+        $allBucket[$date]['linked_count']++;
+    }
 }
 
 $tabs = ['all' => ['label' => 'すべて', 'data' => $allBucket]];
@@ -208,7 +247,19 @@ include __DIR__ . '/header.php';
               data-date="<?= htmlspecialchars($date, ENT_QUOTES, 'UTF-8'); ?>"
               data-detail='<?= htmlspecialchars(json_encode($summary['details'], JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8'); ?>'
             >
-              <h3><?= htmlspecialchars($date, ENT_QUOTES, 'UTF-8'); ?></h3>
+              <div class="daily-card-head">
+                <h3><?= htmlspecialchars($date, ENT_QUOTES, 'UTF-8'); ?></h3>
+                <?php
+                  $linkedCount = (int)($summary['linked_count'] ?? 0);
+                  $totalCount = (int)($summary['total_count'] ?? 0);
+                  $isAllLinked = $totalCount > 0 && $linkedCount === $totalCount;
+                  $iconPath = $isAllLinked ? 'img/check.png' : 'img/batsu.png';
+                ?>
+                <div class="link-status <?= $isAllLinked ? 'is-linked' : 'is-unlinked'; ?>">
+                  <img src="<?= htmlspecialchars($iconPath, ENT_QUOTES, 'UTF-8'); ?>" alt="<?= $isAllLinked ? '紐づけ完了' : '未紐づけあり'; ?>">
+                  <small><?= $linkedCount; ?>/<?= $totalCount; ?></small>
+                </div>
+              </div>
               <dl>
                 <div><dt>合計 amount</dt><dd><?= number_format($summary['total_amount']); ?></dd></div>
                 <div><dt>人数</dt><dd><?= count($summary['people']); ?>人</dd></div>

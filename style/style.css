@@ -273,7 +273,42 @@ h1 { margin: .2rem 0 0; font-size: clamp(1.5rem, 3vw, 2.2rem); }
   position: relative;
   z-index: 1;
 }
-.daily-card h3 { margin: 0 0 .8rem; font-size: 1rem; }
+.daily-card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: .8rem;
+}
+.daily-card h3 { margin: 0; font-size: 1rem; }
+.link-status {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+}
+.link-status img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+  border-radius: 999px;
+  padding: .25rem;
+  background: #fff;
+}
+.link-status small {
+  margin-top: .2rem;
+  font-size: .7rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+.link-status.is-linked img {
+  border: 1px solid #7dd3a0;
+  box-shadow: 0 0 6px #86efac, 0 0 14px rgba(134, 239, 172, 0.85);
+}
+.link-status.is-unlinked img {
+  border: 1px solid #f87171;
+  box-shadow: 0 0 6px #f87171, 0 0 14px rgba(248, 113, 113, 0.85);
+}
 .daily-card dl { margin: 0; display: grid; gap: .35rem; }
 .daily-card div { display: flex; justify-content: space-between; gap: .5rem; }
 .daily-card dt { color: var(--muted); }
