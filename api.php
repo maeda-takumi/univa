@@ -28,19 +28,72 @@ function normalizeSheetValue($value): ?string
 
 function fetchSheetRows(array $sheetConfig): array
 {
-    if (empty($sheetConfig['spreadsheet_id']) || empty($sheetConfig['sheet_name']) || empty($sheetConfig['api_key'])) {
+    if (empty($sheetConfig['spreadsheet_id']) || empty($sheetConfig['sheet_name'])) {
         throw new RuntimeException('config.php のシート設定が不足しています。');
+    }
+
+    $serviceAccountPath = 'service_account.json';
+    if (!file_exists($serviceAccountPath)) {
+        throw new RuntimeException('service_account.json が見つかりません。');
+    }
+    $serviceAccount = json_decode((string)file_get_contents($serviceAccountPath), true);
+    if (!is_array($serviceAccount) || empty($serviceAccount['client_email']) || empty($serviceAccount['private_key'])) {
+        throw new RuntimeException('service_account.json の内容が不正です。');
+    }
+
+    $issuedAt = time();
+    $expiresAt = $issuedAt + 3600;
+    $jwtHeader = rtrim(strtr(base64_encode(json_encode(['alg' => 'RS256', 'typ' => 'JWT'])), '+/', '-_'), '=');
+    $jwtPayload = rtrim(strtr(base64_encode(json_encode([
+        'iss' => $serviceAccount['client_email'],
+        'scope' => 'https://www.googleapis.com/auth/spreadsheets.readonly',
+        'aud' => 'https://oauth2.googleapis.com/token',
+        'iat' => $issuedAt,
+        'exp' => $expiresAt,
+    ])), '+/', '-_'), '=');
+    $unsignedJwt = $jwtHeader . '.' . $jwtPayload;
+    $signature = '';
+    $signed = openssl_sign($unsignedJwt, $signature, $serviceAccount['private_key'], OPENSSL_ALGO_SHA256);
+    if (!$signed) {
+        throw new RuntimeException('サービスアカウント署名の生成に失敗しました。');
+    }
+    $assertion = $unsignedJwt . '.' . rtrim(strtr(base64_encode($signature), '+/', '-_'), '=');
+
+    $tokenRequest = http_build_query([
+        'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        'assertion' => $assertion,
+    ]);
+    $tokenResponse = file_get_contents('https://oauth2.googleapis.com/token', false, stream_context_create([
+        'http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/x-www-form-urlencoded\r\n",
+            'content' => $tokenRequest,
+            'timeout' => 30,
+        ],
+    ]));
+    if ($tokenResponse === false) {
+        throw new RuntimeException('Google OAuthトークンの取得に失敗しました。');
+    }
+    $tokenDecoded = json_decode($tokenResponse, true);
+    $accessToken = $tokenDecoded['access_token'] ?? null;
+    if (!is_string($accessToken) || $accessToken === '') {
+        throw new RuntimeException('Google OAuthトークンのレスポンスが不正です。');
     }
 
     $range = rawurlencode($sheetConfig['sheet_name'] . '!A1:AG');
     $url = sprintf(
-        'https://sheets.googleapis.com/v4/spreadsheets/%s/values/%s?majorDimension=ROWS&key=%s',
+        'https://sheets.googleapis.com/v4/spreadsheets/%s/values/%s?majorDimension=ROWS',
         rawurlencode($sheetConfig['spreadsheet_id']),
-        $range,
-        rawurlencode($sheetConfig['api_key'])
+        $range
     );
 
-    $response = file_get_contents($url);
+    $response = file_get_contents($url, false, stream_context_create([
+        'http' => [
+            'method' => 'GET',
+            'header' => "Authorization: Bearer {$accessToken}\r\n",
+            'timeout' => 30,
+        ],
+    ]));
     if ($response === false) {
         throw new RuntimeException('Google Sheets API の取得に失敗しました。');
     }
