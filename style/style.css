@@ -10,6 +10,18 @@
   --shadow: 0 10px 30px rgba(16, 24, 40, 0.08);
   --radius: 18px;
 }
+body.dark-mode {
+  --bg: #0b1220;
+  --surface: #111a2b;
+  --surface-soft: #17243a;
+  --text: #e5e7eb;
+  --muted: #94a3b8;
+  --brand: #7c8cff;
+  --brand-strong: #97a3ff;
+  --border: #24324a;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.36);
+}
+
 
 * { box-sizing: border-box; }
 body {
@@ -75,6 +87,44 @@ h1 { margin: .2rem 0 0; font-size: clamp(1.5rem, 3vw, 2.2rem); }
 .sidebar-head { display:flex; justify-content:space-between; align-items:center; }
 .sidebar-nav { display:grid; gap:.8rem; margin-top:1rem; }
 .sidebar-nav a { color: var(--text); text-decoration:none; font-weight: 600; }
+.theme-switcher {
+  margin-top: 1.4rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.theme-switcher span { font-weight: 600; }
+.theme-toggle {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.theme-toggle-track {
+  width: 66px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-soft);
+  display: flex;
+  align-items: center;
+  padding: 3px;
+  transition: background .2s ease;
+}
+.theme-toggle-track img {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #fff;
+  padding: 4px;
+  transform: translateX(0);
+  transition: transform .2s ease;
+}
+body.dark-mode .theme-toggle-track img {
+  transform: translateX(30px);
+}
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -254,15 +304,15 @@ h1 { margin: .2rem 0 0; font-size: clamp(1.5rem, 3vw, 2.2rem); }
 .tab-panel.is-active { display: block; }
 .daily-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  /* gap: 1rem; */
   border: 1px solid var(--border);
 }
 .daily-card {
   border: 1px solid var(--border);
   border-left: 0;
   border-top: 0;
-  padding: .95rem;
+  padding: 1.4rem;
   background: var(--surface);
   border-radius: 0;
   transition: transform .18s ease, box-shadow .18s ease;
@@ -279,13 +329,15 @@ h1 { margin: .2rem 0 0; font-size: clamp(1.5rem, 3vw, 2.2rem); }
   align-items: flex-start;
   gap: .8rem;
 }
-.daily-card h3 { margin: 0; font-size: 1rem; }
+.daily-card h3 { margin: 0; font-size: 1.15rem; }
 .link-status {
   display: inline-flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-width: 52px;
+  /* min-width: 52px; */
+    padding: 0 0px 20px 0px;
+
 }
 .link-status img {
   width: 30px;

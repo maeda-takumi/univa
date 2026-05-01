@@ -17,6 +17,14 @@
       <a href="index.php">取引一覧</a>
       <a href="calc.php">集計</a>
     </nav>
+    <section class="theme-switcher" aria-label="表示モード切り替え">
+      <span>表示モード</span>
+      <button id="themeToggle" class="theme-toggle" type="button" aria-label="ダークモード切り替え" aria-pressed="false">
+        <span class="theme-toggle-track">
+          <img id="themeIcon" src="img/sol.png" alt="ライトモード">
+        </span>
+      </button>
+    </section>
   </aside>
   <header class="site-header">
     <div class="container header-inner">
