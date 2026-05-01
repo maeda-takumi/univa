@@ -28,7 +28,9 @@ function normalizeSheetValue($value): ?string
 
 function fetchSheetRows(array $sheetConfig): array
 {
-    if (empty($sheetConfig['spreadsheet_id']) || empty($sheetConfig['sheet_name'])) {
+    $spreadsheetId = (string)($sheetConfig['spreadsheet_id'] ?? '');
+    $sheetName = (string)($sheetConfig['sheet_name'] ?? '');
+    if ($spreadsheetId === '' || $sheetName === '') {
         throw new RuntimeException('config.php のシート設定が不足しています。');
     }
 
@@ -80,10 +82,10 @@ function fetchSheetRows(array $sheetConfig): array
         throw new RuntimeException('Google OAuthトークンのレスポンスが不正です。');
     }
 
-    $range = rawurlencode($sheetConfig['sheet_name'] . '!A1:AG');
+    $range = rawurlencode($sheetName . '!A:AB');
     $url = sprintf(
         'https://sheets.googleapis.com/v4/spreadsheets/%s/values/%s?majorDimension=ROWS',
-        rawurlencode($sheetConfig['spreadsheet_id']),
+        rawurlencode($spreadsheetId),
         $range
     );
 
@@ -117,6 +119,26 @@ if ($isSubmitted && (($_POST['action'] ?? '') === 'import_sheet')) {
 
         $pdo = new PDO('sqlite:' . $dbPath);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $requiredColumns = [
+            'serial_number','sales_year_month','payment_year_month','real_name','system_name','entry_point','state','line_name','phone_number','email','sales_date','payment_date','expected_payment_amount','payment_amount','payment_count','login_id','payment_destination','video_person_in_charge','sales_person_in_charge','acquisition_channel','age','system_delivery_status','remarks','payment_week','data1','data2','line_registration_date','imported_at'
+        ];
+        $existingColumns = [];
+        $tableInfo = $pdo->query('PRAGMA table_info(spreadsheet_imports)');
+        if ($tableInfo !== false) {
+            while ($column = $tableInfo->fetch(PDO::FETCH_ASSOC)) {
+                $name = (string)($column['name'] ?? '');
+                if ($name !== '') {
+                    $existingColumns[$name] = true;
+                }
+            }
+        }
+        if (!empty($existingColumns)) {
+            foreach ($requiredColumns as $columnName) {
+                if (!isset($existingColumns[$columnName])) {
+                    $pdo->exec('ALTER TABLE spreadsheet_imports ADD COLUMN ' . $columnName . ' TEXT');
+                }
+            }
+        }
         $pdo->exec(
             'CREATE TABLE IF NOT EXISTS spreadsheet_imports (
                 id TEXT PRIMARY KEY,
@@ -147,22 +169,17 @@ if ($isSubmitted && (($_POST['action'] ?? '') === 'import_sheet')) {
                 data1 TEXT,
                 data2 TEXT,
                 line_registration_date TEXT,
-                gender TEXT,
-                data3 TEXT,
-                data4 TEXT,
-                data5 TEXT,
-                data6 TEXT,
                 imported_at TEXT
             )'
         );
 
         $stmt = $pdo->prepare(
             'INSERT INTO spreadsheet_imports (
-                id, serial_number, sales_year_month, payment_year_month, real_name, system_name, entry_point, state, line_name, phone_number, email, sales_date, payment_date, expected_payment_amount, payment_amount, payment_count, login_id, payment_destination, video_person_in_charge, sales_person_in_charge, acquisition_channel, age, system_delivery_status, remarks, payment_week, data1, data2, line_registration_date, gender, data3, data4, data5, data6, imported_at
+                id, serial_number, sales_year_month, payment_year_month, real_name, system_name, entry_point, state, line_name, phone_number, email, sales_date, payment_date, expected_payment_amount, payment_amount, payment_count, login_id, payment_destination, video_person_in_charge, sales_person_in_charge, acquisition_channel, age, system_delivery_status, remarks, payment_week, data1, data2, line_registration_date, imported_at
             ) VALUES (
-                :id, :serial_number, :sales_year_month, :payment_year_month, :real_name, :system_name, :entry_point, :state, :line_name, :phone_number, :email, :sales_date, :payment_date, :expected_payment_amount, :payment_amount, :payment_count, :login_id, :payment_destination, :video_person_in_charge, :sales_person_in_charge, :acquisition_channel, :age, :system_delivery_status, :remarks, :payment_week, :data1, :data2, :line_registration_date, :gender, :data3, :data4, :data5, :data6, :imported_at
+                :id, :serial_number, :sales_year_month, :payment_year_month, :real_name, :system_name, :entry_point, :state, :line_name, :phone_number, :email, :sales_date, :payment_date, :expected_payment_amount, :payment_amount, :payment_count, :login_id, :payment_destination, :video_person_in_charge, :sales_person_in_charge, :acquisition_channel, :age, :system_delivery_status, :remarks, :payment_week, :data1, :data2, :line_registration_date, :imported_at
             ) ON CONFLICT(id) DO UPDATE SET
-                serial_number=excluded.serial_number, sales_year_month=excluded.sales_year_month, payment_year_month=excluded.payment_year_month, real_name=excluded.real_name, system_name=excluded.system_name, entry_point=excluded.entry_point, state=excluded.state, line_name=excluded.line_name, phone_number=excluded.phone_number, email=excluded.email, sales_date=excluded.sales_date, payment_date=excluded.payment_date, expected_payment_amount=excluded.expected_payment_amount, payment_amount=excluded.payment_amount, payment_count=excluded.payment_count, login_id=excluded.login_id, payment_destination=excluded.payment_destination, video_person_in_charge=excluded.video_person_in_charge, sales_person_in_charge=excluded.sales_person_in_charge, acquisition_channel=excluded.acquisition_channel, age=excluded.age, system_delivery_status=excluded.system_delivery_status, remarks=excluded.remarks, payment_week=excluded.payment_week, data1=excluded.data1, data2=excluded.data2, line_registration_date=excluded.line_registration_date, gender=excluded.gender, data3=excluded.data3, data4=excluded.data4, data5=excluded.data5, data6=excluded.data6, imported_at=excluded.imported_at'
+                serial_number=excluded.serial_number, sales_year_month=excluded.sales_year_month, payment_year_month=excluded.payment_year_month, real_name=excluded.real_name, system_name=excluded.system_name, entry_point=excluded.entry_point, state=excluded.state, line_name=excluded.line_name, phone_number=excluded.phone_number, email=excluded.email, sales_date=excluded.sales_date, payment_date=excluded.payment_date, expected_payment_amount=excluded.expected_payment_amount, payment_amount=excluded.payment_amount, payment_count=excluded.payment_count, login_id=excluded.login_id, payment_destination=excluded.payment_destination, video_person_in_charge=excluded.video_person_in_charge, sales_person_in_charge=excluded.sales_person_in_charge, acquisition_channel=excluded.acquisition_channel, age=excluded.age, system_delivery_status=excluded.system_delivery_status, remarks=excluded.remarks, payment_week=excluded.payment_week, data1=excluded.data1, data2=excluded.data2, line_registration_date=excluded.line_registration_date, imported_at=excluded.imported_at'
         );
 
         $imported = 0;
@@ -172,7 +189,7 @@ if ($isSubmitted && (($_POST['action'] ?? '') === 'import_sheet')) {
                 continue;
             }
             $stmt->execute([
-                ':id' => $id, ':serial_number' => normalizeSheetValue($row[1] ?? null), ':sales_year_month' => normalizeSheetValue($row[2] ?? null), ':payment_year_month' => normalizeSheetValue($row[3] ?? null), ':real_name' => normalizeSheetValue($row[4] ?? null), ':system_name' => normalizeSheetValue($row[5] ?? null), ':entry_point' => normalizeSheetValue($row[6] ?? null), ':state' => normalizeSheetValue($row[7] ?? null), ':line_name' => normalizeSheetValue($row[8] ?? null), ':phone_number' => normalizeSheetValue($row[9] ?? null), ':email' => normalizeSheetValue($row[10] ?? null), ':sales_date' => normalizeSheetValue($row[11] ?? null), ':payment_date' => normalizeSheetValue($row[12] ?? null), ':expected_payment_amount' => normalizeSheetValue($row[13] ?? null), ':payment_amount' => normalizeSheetValue($row[14] ?? null), ':payment_count' => normalizeSheetValue($row[15] ?? null), ':login_id' => normalizeSheetValue($row[16] ?? null), ':payment_destination' => normalizeSheetValue($row[17] ?? null), ':video_person_in_charge' => normalizeSheetValue($row[18] ?? null), ':sales_person_in_charge' => normalizeSheetValue($row[19] ?? null), ':acquisition_channel' => normalizeSheetValue($row[20] ?? null), ':age' => normalizeSheetValue($row[21] ?? null), ':system_delivery_status' => normalizeSheetValue($row[22] ?? null), ':remarks' => normalizeSheetValue($row[23] ?? null), ':payment_week' => normalizeSheetValue($row[24] ?? null), ':data1' => normalizeSheetValue($row[25] ?? null), ':data2' => normalizeSheetValue($row[26] ?? null), ':line_registration_date' => normalizeSheetValue($row[27] ?? null), ':gender' => normalizeSheetValue($row[28] ?? null), ':data3' => normalizeSheetValue($row[29] ?? null), ':data4' => normalizeSheetValue($row[30] ?? null), ':data5' => normalizeSheetValue($row[31] ?? null), ':data6' => normalizeSheetValue($row[32] ?? null), ':imported_at' => gmdate('c'),
+                ':id' => $id, ':serial_number' => normalizeSheetValue($row[1] ?? null), ':sales_year_month' => normalizeSheetValue($row[2] ?? null), ':payment_year_month' => normalizeSheetValue($row[3] ?? null), ':real_name' => normalizeSheetValue($row[4] ?? null), ':system_name' => normalizeSheetValue($row[5] ?? null), ':entry_point' => normalizeSheetValue($row[6] ?? null), ':state' => normalizeSheetValue($row[7] ?? null), ':line_name' => normalizeSheetValue($row[8] ?? null), ':phone_number' => normalizeSheetValue($row[9] ?? null), ':email' => normalizeSheetValue($row[10] ?? null), ':sales_date' => normalizeSheetValue($row[11] ?? null), ':payment_date' => normalizeSheetValue($row[12] ?? null), ':expected_payment_amount' => normalizeSheetValue($row[13] ?? null), ':payment_amount' => normalizeSheetValue($row[14] ?? null), ':payment_count' => normalizeSheetValue($row[15] ?? null), ':login_id' => normalizeSheetValue($row[16] ?? null), ':payment_destination' => normalizeSheetValue($row[17] ?? null), ':video_person_in_charge' => normalizeSheetValue($row[18] ?? null), ':sales_person_in_charge' => normalizeSheetValue($row[19] ?? null), ':acquisition_channel' => normalizeSheetValue($row[20] ?? null), ':age' => normalizeSheetValue($row[21] ?? null), ':system_delivery_status' => normalizeSheetValue($row[22] ?? null), ':remarks' => normalizeSheetValue($row[23] ?? null), ':payment_week' => normalizeSheetValue($row[24] ?? null), ':data1' => normalizeSheetValue($row[25] ?? null), ':data2' => normalizeSheetValue($row[26] ?? null), ':line_registration_date' => normalizeSheetValue($row[27] ?? null), ':imported_at' => gmdate('c'),
             ]);
             $imported++;
         }
@@ -398,9 +415,10 @@ if ($isSubmitted && (($_POST['action'] ?? '') === 'import_sheet')) {
 </head>
 <body>
     <div class="container">
-    <h1>UnivaPay 取引履歴取得</h1>
-    <p class="description">期間を指定して実行すると、API取得結果をSQLiteへ保存します。</p>
-    <h1>UnivaPay 取引履歴取得</h1>
+    <h1>データ取込</h1>
+    <p class="description">API取得とスプレッドシート取得を区分けしています。必要な方だけ実行してください。</p>
+
+    <h2>1. UniVaPay API 取得（期間指定）</h2>
 
     <form method="post" id="fetchForm">
         <input type="hidden" name="action" value="fetch_univapay">
@@ -415,6 +433,7 @@ if ($isSubmitted && (($_POST['action'] ?? '') === 'import_sheet')) {
         </label>
         <button type="submit" id="submitButton">実行</button>
     </form>
+    <h2 style="margin-top:20px;">2. スプレッドシート取込（A列〜AB列 / 全行）</h2>
     <form method="post" style="margin-top: 12px;">
         <input type="hidden" name="action" value="import_sheet">
         <button type="submit">スプレッドシート取込</button>
