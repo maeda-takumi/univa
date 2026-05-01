@@ -306,13 +306,13 @@ if ($isSubmitted && (($_POST['action'] ?? '') === 'import_sheet')) {
                         payment_type, charge_type, bank_transfer_payment_status, bank_transfer_latest_deposit_date,
                         cardholder_name, cardholder_email, brand, gateway, service_provider,
                         metadata_name, metadata_phone_number, metadata_link_id,
-                        :store_id, :store_name, :merchant_name, :db_id, :raw_json, :updated_at
+                        store_id, store_name, merchant_name, db_id, raw_json, updated_at
                     ) VALUES (
                         :resource_id, :created_on, :charge_id, :type, :status, :amount, :currency,
                         :payment_type, :charge_type, :bank_transfer_payment_status, :bank_transfer_latest_deposit_date,
                         :cardholder_name, :cardholder_email, :brand, :gateway, :service_provider,
                         :metadata_name, :metadata_phone_number, :metadata_link_id,
-                        :store_id, :store_name, :merchant_name, :raw_json, :updated_at
+                        :store_id, :store_name, :merchant_name, :db_id, :raw_json, :updated_at
                     ) ON CONFLICT(resource_id) DO UPDATE SET
                         created_on = excluded.created_on,
                         charge_id = excluded.charge_id,
@@ -434,9 +434,9 @@ if ($isSubmitted && (($_POST['action'] ?? '') === 'import_sheet')) {
         <button type="submit" id="submitButton">実行</button>
     </form>
     <h2 style="margin-top:20px;">2. スプレッドシート取込（A列〜AB列 / 全行）</h2>
-    <form method="post" style="margin-top: 12px;">
+    <form method="post" style="margin-top: 12px;" id="sheetImportForm">
         <input type="hidden" name="action" value="import_sheet">
-        <button type="submit">スプレッドシート取込</button>
+        <button type="submit" id="sheetImportButton">スプレッドシート取込</button>
     </form>
 
     <div id="runningStatus" class="status" aria-live="polite"></div>
@@ -454,16 +454,29 @@ if ($isSubmitted && (($_POST['action'] ?? '') === 'import_sheet')) {
     </div>
 
     <script>
-        const form = document.getElementById('fetchForm');
+        const fetchForm = document.getElementById('fetchForm');
         const submitButton = document.getElementById('submitButton');
+        const sheetImportForm = document.getElementById('sheetImportForm');
+        const sheetImportButton = document.getElementById('sheetImportButton');
         const runningStatus = document.getElementById('runningStatus');
 
-        form.addEventListener('submit', () => {
-            runningStatus.textContent = '実行中です... API取得とDB保存が完了するまでお待ちください。';
-            runningStatus.className = 'status running show';
-            submitButton.disabled = true;
-            submitButton.textContent = '実行中...';
-        });
+        if (fetchForm) {
+            fetchForm.addEventListener('submit', () => {
+                runningStatus.textContent = '実行中です... API取得とDB保存が完了するまでお待ちください。';
+                runningStatus.className = 'status running show';
+                submitButton.disabled = true;
+                submitButton.textContent = '実行中...';
+            });
+        }
+
+        if (sheetImportForm) {
+            sheetImportForm.addEventListener('submit', () => {
+                runningStatus.textContent = '実行中です... スプレッドシート取込が完了するまでお待ちください。';
+                runningStatus.className = 'status running show';
+                sheetImportButton.disabled = true;
+                sheetImportButton.textContent = '取込中...';
+            });
+        }
     </script>
 </body>
 </html>
