@@ -24,7 +24,7 @@ foreach ($dbFiles as $file) {
         }
 
         $stmt = $pdo->query(
-            'SELECT created_on, status, payment_type, metadata_name, cardholder_name, cardholder_email FROM ' . $table . ' ORDER BY created_on DESC'
+            'SELECT created_on, status, payment_type, amount, metadata_name, cardholder_name, cardholder_email FROM ' . $table . ' ORDER BY created_on DESC'
         );
 
         while ($row = $stmt->fetch()) {
@@ -34,6 +34,7 @@ foreach ($dbFiles as $file) {
                 'created_on' => $row['created_on'] ?? '',
                 'status' => $row['status'] ?? '',
                 'payment_type' => $row['payment_type'] ?? '',
+                'amount' => $row['amount'] ?? '',
                 'metadata_name' => $metadataName !== '' ? $metadataName : $cardholderName,
                 'cardholder_email' => $row['cardholder_email'] ?? '',
             ];
@@ -44,6 +45,53 @@ foreach ($dbFiles as $file) {
     }
 }
 include __DIR__ . '/header.php';
+
+function formatDate(string $value): string
+{
+    if (trim($value) === '') {
+        return '';
+    }
+
+    $timestamp = strtotime($value);
+    if ($timestamp === false) {
+        return $value;
+    }
+
+    return date('Y/m/d H:i:s', $timestamp);
+}
+
+function formatAmount($value): string
+{
+    if ($value === null || $value === '') {
+        return '';
+    }
+
+    if (!is_numeric($value)) {
+        return (string)$value;
+    }
+
+    return number_format((float)$value);
+}
+
+function labelStatus(string $status): string
+{
+    return match ($status) {
+        'successful' => '成功',
+        'failed' => '失敗',
+        'awaiting' => '処理待ち',
+        default => $status,
+    };
+}
+
+function labelPaymentType(string $paymentType): string
+{
+    return match ($paymentType) {
+        'bank_transfer' => '振込',
+        'card' => 'カード',
+        default => $paymentType,
+    };
+}
+
 ?>
 
 <section class="panel">
@@ -64,14 +112,16 @@ include __DIR__ . '/header.php';
           <span>日付</span>
           <span>状態</span>
           <span>入金方法</span>
+          <span>入金額</span>
           <span>氏名</span>
           <span>メールアドレス</span>
         </li>
         <?php foreach ($records as $record): ?>
           <li class="transaction-item">
-            <span><?= htmlspecialchars((string)$record['created_on'], ENT_QUOTES, 'UTF-8'); ?></span>
-            <span><?= htmlspecialchars((string)$record['status'], ENT_QUOTES, 'UTF-8'); ?></span>
-            <span><?= htmlspecialchars((string)$record['payment_type'], ENT_QUOTES, 'UTF-8'); ?></span>
+            <span><?= htmlspecialchars(formatDate((string)$record['created_on']), ENT_QUOTES, 'UTF-8'); ?></span>
+            <span><?= htmlspecialchars(labelStatus((string)$record['status']), ENT_QUOTES, 'UTF-8'); ?></span>
+            <span><?= htmlspecialchars(labelPaymentType((string)$record['payment_type']), ENT_QUOTES, 'UTF-8'); ?></span>
+            <span><?= htmlspecialchars(formatAmount($record['amount']), ENT_QUOTES, 'UTF-8'); ?></span>
             <span><?= htmlspecialchars((string)$record['metadata_name'], ENT_QUOTES, 'UTF-8'); ?></span>
             <span><?= htmlspecialchars((string)$record['cardholder_email'], ENT_QUOTES, 'UTF-8'); ?></span>
           </li>
