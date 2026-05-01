@@ -30,7 +30,14 @@ foreach ($dbFiles as $file) {
                 continue;
             }
 
-            $date = date('Y-m-d', strtotime($createdOn));
+
+            $timestamp = strtotime($createdOn);
+            if ($timestamp === false) {
+                continue;
+            }
+
+            $date = date('Y-m-d', $timestamp);
+            $month = date('Y-m', $timestamp);
             $status = trim((string)($row['status'] ?? ''));
             $paymentType = trim((string)($row['payment_type'] ?? ''));
             $amount = is_numeric($row['amount'] ?? null) ? (int)$row['amount'] : 0;
@@ -42,9 +49,12 @@ foreach ($dbFiles as $file) {
 
             $records[] = [
                 'date' => $date,
+                'month' => $month,
                 'status' => $status,
                 'payment_type' => $paymentType,
                 'amount' => $amount,
+                'name' => $name,
+                'email' => $email,
                 'person_key' => $email !== '' ? $email : $name,
             ];
         }
@@ -76,10 +86,14 @@ function paymentTypeLabel(string $paymentType): string
 
 $statuses = [];
 $allBucket = [];
+$months = [];
 
 foreach ($records as $record) {
     $status = $record['status'] !== '' ? $record['status'] : '__empty__';
     $date = $record['date'];
+    $month = $record['month'];
+
+    $months[$month] = true;
 
     if (!isset($statuses[$status])) {
         $statuses[$status] = [];
@@ -89,6 +103,7 @@ foreach ($records as $record) {
             'total_amount' => 0,
             'people' => [],
             'payment_totals' => [],
+            'details' => [],
         ];
     }
 
@@ -97,6 +112,7 @@ foreach ($records as $record) {
             'total_amount' => 0,
             'people' => [],
             'payment_totals' => [],
+            'details' => [],
         ];
     }
 
@@ -111,8 +127,18 @@ foreach ($records as $record) {
         $allBucket[$date]['people'][$key] = true;
     }
 
-    $statuses[$status][$date]['payment_totals'][$paymentType] = ($statuses[$status][$date]['payment_totals'][$paymentType] ?? 0) + $record['amount'];
-    $allBucket[$date]['payment_totals'][$paymentType] = ($allBucket[$date]['payment_totals'][$paymentType] ?? 0) + $record['amount'];
+    // 入金先別の集計は「合計金額」ではなく「件数」をカウント
+    $statuses[$status][$date]['payment_totals'][$paymentType] = ($statuses[$status][$date]['payment_totals'][$paymentType] ?? 0) + 1;
+    $allBucket[$date]['payment_totals'][$paymentType] = ($allBucket[$date]['payment_totals'][$paymentType] ?? 0) + 1;
+
+    $detail = [
+        'name' => $record['name'] !== '' ? $record['name'] : '未設定',
+        'email' => $record['email'] !== '' ? $record['email'] : '未設定',
+        'amount' => $record['amount'],
+        'payment_type' => paymentTypeLabel($record['payment_type']),
+    ];
+    $statuses[$status][$date]['details'][] = $detail;
+    $allBucket[$date]['details'][] = $detail;
 }
 
 $tabs = ['all' => ['label' => 'すべて', 'data' => $allBucket]];
@@ -122,6 +148,13 @@ foreach ($statuses as $status => $data) {
         'data' => $data,
     ];
 }
+
+$availableMonths = array_keys($months);
+rsort($availableMonths);
+$currentMonth = date('Y-m');
+$defaultMonth = in_array($currentMonth, $availableMonths, true)
+    ? $currentMonth
+    : ($availableMonths[0] ?? '');
 
 foreach ($tabs as &$tab) {
     krsort($tab['data']);
@@ -141,6 +174,16 @@ include __DIR__ . '/header.php';
       <p>集計対象のデータがありません。</p>
     </div>
   <?php else: ?>
+    <div class="month-selector-wrap">
+      <label for="monthSelector">表示月</label>
+      <select id="monthSelector" class="month-selector">
+        <?php foreach ($availableMonths as $month): ?>
+          <option value="<?= htmlspecialchars($month, ENT_QUOTES, 'UTF-8'); ?>"<?= $month === $defaultMonth ? ' selected' : ''; ?>>
+            <?= htmlspecialchars($month, ENT_QUOTES, 'UTF-8'); ?>
+          </option>
+        <?php endforeach; ?>
+      </select>
+    </div>
     <div class="status-tabs" role="tablist" aria-label="状態別集計タブ">
       <?php $idx = 0; foreach ($tabs as $statusKey => $tab): ?>
         <button
@@ -159,15 +202,21 @@ include __DIR__ . '/header.php';
       <div class="tab-panel<?= $tabIdx === 0 ? ' is-active' : ''; ?>" id="tab-<?= htmlspecialchars($statusKey, ENT_QUOTES, 'UTF-8'); ?>" role="tabpanel">
         <div class="daily-card-grid">
           <?php foreach ($tab['data'] as $date => $summary): ?>
-            <article class="daily-card">
+            <?php if (strpos($date, $defaultMonth) !== 0) { continue; } ?>
+            <article
+              class="daily-card js-detail-card"
+              data-month="<?= htmlspecialchars(substr($date, 0, 7), ENT_QUOTES, 'UTF-8'); ?>"
+              data-date="<?= htmlspecialchars($date, ENT_QUOTES, 'UTF-8'); ?>"
+              data-detail='<?= htmlspecialchars(json_encode($summary['details'], JSON_UNESCAPED_UNICODE), ENT_QUOTES, 'UTF-8'); ?>'
+            >
               <h3><?= htmlspecialchars($date, ENT_QUOTES, 'UTF-8'); ?></h3>
               <dl>
                 <div><dt>合計 amount</dt><dd><?= number_format($summary['total_amount']); ?></dd></div>
                 <div><dt>人数</dt><dd><?= count($summary['people']); ?>人</dd></div>
-                <?php foreach ($summary['payment_totals'] as $paymentType => $total): ?>
+                <?php foreach ($summary['payment_totals'] as $paymentType => $count): ?>
                   <div>
-                    <dt><?= htmlspecialchars(paymentTypeLabel($paymentType === '__empty__' ? '' : $paymentType), ENT_QUOTES, 'UTF-8'); ?> 合計</dt>
-                    <dd><?= number_format($total); ?></dd>
+                    <dt><?= htmlspecialchars(paymentTypeLabel($paymentType === '__empty__' ? '' : $paymentType), ENT_QUOTES, 'UTF-8'); ?> 件数</dt>
+                    <dd><?= number_format($count); ?></dd>
                   </div>
                 <?php endforeach; ?>
               </dl>
@@ -176,6 +225,19 @@ include __DIR__ . '/header.php';
         </div>
       </div>
     <?php $tabIdx++; endforeach; ?>
+
+    <div id="detailPopup" class="detail-popup" aria-hidden="true" role="dialog" aria-labelledby="detailPopupTitle">
+      <div class="detail-popup-overlay" data-close-detail></div>
+      <section class="detail-popup-panel">
+        <header class="detail-popup-head">
+          <h3 id="detailPopupTitle">詳細一覧</h3>
+          <button type="button" class="icon-btn" data-close-detail aria-label="閉じる">×</button>
+        </header>
+        <div class="detail-popup-content">
+          <ul id="detailPopupList" class="detail-list"></ul>
+        </div>
+      </section>
+    </div>
   <?php endif; ?>
 </section>
 
@@ -183,6 +245,16 @@ include __DIR__ . '/header.php';
 document.addEventListener('DOMContentLoaded', function () {
   const tabs = document.querySelectorAll('.status-tab');
   const panels = document.querySelectorAll('.tab-panel');
+  const monthSelector = document.getElementById('monthSelector');
+  const detailPopup = document.getElementById('detailPopup');
+  const detailPopupTitle = document.getElementById('detailPopupTitle');
+  const detailPopupList = document.getElementById('detailPopupList');
+
+  function filterByMonth(month) {
+    document.querySelectorAll('.js-detail-card').forEach(function (card) {
+      card.style.display = card.dataset.month === month ? '' : 'none';
+    });
+  }
 
   tabs.forEach(function (tab) {
     tab.addEventListener('click', function () {
@@ -204,6 +276,57 @@ document.addEventListener('DOMContentLoaded', function () {
         panel.classList.add('is-active');
       }
     });
+  });
+  if (monthSelector) {
+    filterByMonth(monthSelector.value);
+    monthSelector.addEventListener('change', function () {
+      filterByMonth(monthSelector.value);
+    });
+  }
+
+  function closeDetailPopup() {
+    if (!detailPopup) {
+      return;
+    }
+    detailPopup.classList.remove('is-open');
+    detailPopup.setAttribute('aria-hidden', 'true');
+  }
+
+  document.querySelectorAll('.js-detail-card').forEach(function (card) {
+    card.addEventListener('click', function () {
+      if (!detailPopup || !detailPopupList || !detailPopupTitle) {
+        return;
+      }
+
+      const date = card.dataset.date || '';
+      detailPopupTitle.textContent = date + ' の詳細一覧';
+      detailPopupList.innerHTML = '';
+
+      let detail = [];
+      try {
+        detail = JSON.parse(card.dataset.detail || '[]');
+      } catch (error) {
+        detail = [];
+      }
+
+      detail.forEach(function (item) {
+        const li = document.createElement('li');
+        li.className = 'detail-item';
+        li.innerHTML =
+          '<span><strong>氏名:</strong> ' + item.name + '</span>' +
+          '<span><strong>メアド:</strong> ' + item.email + '</span>' +
+          '<span><strong>金額:</strong> ' + Number(item.amount || 0).toLocaleString() + '</span>' +
+          '<span><strong>入金方法:</strong> ' + item.payment_type + '</span>';
+        detailPopupList.appendChild(li);
+      });
+
+      detailPopup.classList.add('is-open');
+      detailPopup.setAttribute('aria-hidden', 'false');
+    });
+  });
+
+  document.querySelectorAll('[data-close-detail]').forEach(function (button) {
+    button.addEventListener('click', closeDetailPopup);
   });
 });
 </script>
