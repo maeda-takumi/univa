@@ -2,6 +2,14 @@
 $dbFiles = glob(__DIR__ . '/*.sqlite') ?: [];
 $records = [];
 
+$filters = [
+    'date_from' => trim((string)($_GET['date_from'] ?? '')),
+    'date_to' => trim((string)($_GET['date_to'] ?? '')),
+    'status' => trim((string)($_GET['status'] ?? '')),
+    'payment_type' => trim((string)($_GET['payment_type'] ?? '')),
+    'name' => trim((string)($_GET['name'] ?? '')),
+    'email' => trim((string)($_GET['email'] ?? '')),
+];
 foreach ($dbFiles as $file) {
     $pdo = null;
     try {
@@ -92,6 +100,44 @@ function labelPaymentType(string $paymentType): string
     };
 }
 
+function isMatchedRecord(array $record, array $filters): bool
+{
+    if ($filters['date_from'] !== '') {
+        $recordTimestamp = strtotime((string)$record['created_on']);
+        $fromTimestamp = strtotime($filters['date_from'] . ' 00:00:00');
+        if ($recordTimestamp === false || $fromTimestamp === false || $recordTimestamp < $fromTimestamp) {
+            return false;
+        }
+    }
+
+    if ($filters['date_to'] !== '') {
+        $recordTimestamp = strtotime((string)$record['created_on']);
+        $toTimestamp = strtotime($filters['date_to'] . ' 23:59:59');
+        if ($recordTimestamp === false || $toTimestamp === false || $recordTimestamp > $toTimestamp) {
+            return false;
+        }
+    }
+
+    if ($filters['status'] !== '' && (string)$record['status'] !== $filters['status']) {
+        return false;
+    }
+
+    if ($filters['payment_type'] !== '' && (string)$record['payment_type'] !== $filters['payment_type']) {
+        return false;
+    }
+
+    if ($filters['name'] !== '' && stripos((string)$record['metadata_name'], $filters['name']) === false) {
+        return false;
+    }
+
+    if ($filters['email'] !== '' && stripos((string)$record['cardholder_email'], $filters['email']) === false) {
+        return false;
+    }
+
+    return true;
+}
+
+$records = array_values(array_filter($records, static fn(array $record): bool => isMatchedRecord($record, $filters)));
 ?>
 
 <section class="panel">
@@ -100,6 +146,45 @@ function labelPaymentType(string $paymentType): string
     <span class="count"><?= count($records); ?> 件</span>
   </div>
 
+  <form method="get" class="filter-form">
+    <div>
+      <label for="date_from">日付（開始）</label>
+      <input type="date" id="date_from" name="date_from" value="<?= htmlspecialchars($filters['date_from'], ENT_QUOTES, 'UTF-8'); ?>">
+    </div>
+    <div>
+      <label for="date_to">日付（終了）</label>
+      <input type="date" id="date_to" name="date_to" value="<?= htmlspecialchars($filters['date_to'], ENT_QUOTES, 'UTF-8'); ?>">
+    </div>
+    <div>
+      <label for="status">状態</label>
+      <select id="status" name="status">
+        <option value="">すべて</option>
+        <option value="successful" <?= $filters['status'] === 'successful' ? 'selected' : ''; ?>>成功</option>
+        <option value="failed" <?= $filters['status'] === 'failed' ? 'selected' : ''; ?>>失敗</option>
+        <option value="awaiting" <?= $filters['status'] === 'awaiting' ? 'selected' : ''; ?>>処理待ち</option>
+      </select>
+    </div>
+    <div>
+      <label for="payment_type">入金方法</label>
+      <select id="payment_type" name="payment_type">
+        <option value="">すべて</option>
+        <option value="bank_transfer" <?= $filters['payment_type'] === 'bank_transfer' ? 'selected' : ''; ?>>振込</option>
+        <option value="card" <?= $filters['payment_type'] === 'card' ? 'selected' : ''; ?>>カード</option>
+      </select>
+    </div>
+    <div>
+      <label for="name">氏名</label>
+      <input type="text" id="name" name="name" value="<?= htmlspecialchars($filters['name'], ENT_QUOTES, 'UTF-8'); ?>">
+    </div>
+    <div>
+      <label for="email">メールアドレス</label>
+      <input type="text" id="email" name="email" value="<?= htmlspecialchars($filters['email'], ENT_QUOTES, 'UTF-8'); ?>">
+    </div>
+    <div>
+      <button type="submit">絞り込む</button>
+      <a href="index.php">リセット</a>
+    </div>
+  </form>
   <?php if (empty($records)): ?>
     <div class="empty-state">
       <p>表示可能な取引データは見つかりませんでした。</p>
