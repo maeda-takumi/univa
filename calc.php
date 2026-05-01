@@ -202,7 +202,6 @@ include __DIR__ . '/header.php';
       <div class="tab-panel<?= $tabIdx === 0 ? ' is-active' : ''; ?>" id="tab-<?= htmlspecialchars($statusKey, ENT_QUOTES, 'UTF-8'); ?>" role="tabpanel">
         <div class="daily-card-grid">
           <?php foreach ($tab['data'] as $date => $summary): ?>
-            <?php if (strpos($date, $defaultMonth) !== 0) { continue; } ?>
             <article
               class="daily-card js-detail-card"
               data-month="<?= htmlspecialchars(substr($date, 0, 7), ENT_QUOTES, 'UTF-8'); ?>"
