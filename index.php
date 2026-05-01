@@ -10,8 +10,21 @@ foreach ($dbFiles as $file) {
             PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         ]);
 
+        $table = null;
+        foreach (['transactions', 'transaction_history'] as $candidate) {
+            $check = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name='{$candidate}'");
+            if ($check !== false && $check->fetch()) {
+                $table = $candidate;
+                break;
+            }
+        }
+
+        if ($table === null) {
+            continue;
+        }
+
         $stmt = $pdo->query(
-            'SELECT created_on, status, payment_type, metadata_name, cardholder_name, cardholder_email FROM transactions ORDER BY created_on DESC'
+            'SELECT created_on, status, payment_type, metadata_name, cardholder_name, cardholder_email FROM ' . $table . ' ORDER BY created_on DESC'
         );
 
         while ($row = $stmt->fetch()) {
