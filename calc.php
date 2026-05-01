@@ -253,7 +253,7 @@ include __DIR__ . '/header.php';
                   $linkedCount = (int)($summary['linked_count'] ?? 0);
                   $totalCount = (int)($summary['total_count'] ?? 0);
                   $isAllLinked = $totalCount > 0 && $linkedCount === $totalCount;
-                  $iconPath = $isAllLinked ? 'img/check.png' : 'img/batsu.png';
+                  $iconPath = $isAllLinked ? 'img/check2.png' : 'img/batsu2.png';
                 ?>
                 <div class="link-status <?= $isAllLinked ? 'is-linked' : 'is-unlinked'; ?>">
                   <img src="<?= htmlspecialchars($iconPath, ENT_QUOTES, 'UTF-8'); ?>" alt="<?= $isAllLinked ? '紐づけ完了' : '未紐づけあり'; ?>">
