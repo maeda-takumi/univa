@@ -424,4 +424,33 @@ body.dark-mode .theme-toggle-track img {
 }
 .detail-item:last-child {
   border-bottom: none;
+
+}
+.link-controls {
+  display: grid;
+  gap: .4rem;
+}
+.js-link-input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: .45rem .6rem;
+}
+.js-link-save,
+.js-candidate-btn {
+  border: 1px solid var(--border);
+  background: #fff;
+  border-radius: 8px;
+  padding: .4rem .6rem;
+  text-align: left;
+  cursor: pointer;
+}
+.js-link-save {
+  width: fit-content;
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+.js-link-candidates {
+  display: grid;
+  gap: .3rem;
 }

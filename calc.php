@@ -2,6 +2,47 @@
 $dbFiles = glob(__DIR__ . '/*.sqlite') ?: [];
 $records = [];
 
+$linkTargets = [];
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (($_POST['action'] ?? '') === 'link_transaction')) {
+    header('Content-Type: application/json; charset=UTF-8');
+    $token = trim((string)($_POST['token'] ?? ''));
+    $sheetId = trim((string)($_POST['sheet_id'] ?? ''));
+    if ($token === '' || $sheetId === '') {
+        http_response_code(422);
+        echo json_encode(['ok' => false, 'message' => 'token または sheet_id が未指定です']);
+        exit;
+    }
+    $dbFilesForLink = glob(__DIR__ . '/*.sqlite') ?: [];
+    $updated = false;
+    foreach ($dbFilesForLink as $file) {
+        try {
+            $pdoLink = new PDO('sqlite:' . $file, null, null, [
+                PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            ]);
+            $table = null;
+            foreach (['transactions', 'transaction_history'] as $candidate) {
+                $check = $pdoLink->query("SELECT name FROM sqlite_master WHERE type='table' AND name='{$candidate}'");
+                if ($check !== false && $check->fetch()) {
+                    $table = $candidate;
+                    break;
+                }
+            }
+            if ($table === null) { continue; }
+            $stmtLink = $pdoLink->prepare('UPDATE ' . $table . ' SET db_id = :db_id WHERE resource_id = :resource_id');
+            $stmtLink->execute([':db_id' => $sheetId, ':resource_id' => $token]);
+            if ($stmtLink->rowCount() > 0) { $updated = true; break; }
+        } catch (Throwable $e) { continue; }
+    }
+    if (!$updated) {
+        http_response_code(404);
+        echo json_encode(['ok' => false, 'message' => '対象データが見つかりませんでした']);
+        exit;
+    }
+    echo json_encode(['ok' => true]);
+    exit;
+}
 foreach ($dbFiles as $file) {
     try {
         $pdo = new PDO('sqlite:' . $file, null, null, [
@@ -46,7 +87,7 @@ foreach ($dbFiles as $file) {
             $pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN db_id TEXT');
         }
 
-        $stmt = $pdo->query('SELECT created_on, status, payment_type, amount, metadata_name, cardholder_name, cardholder_email, db_id FROM ' . $table);
+        $stmt = $pdo->query('SELECT created_on, status, payment_type, amount, metadata_name, cardholder_name, cardholder_email, db_id, resource_id FROM ' . $table);
 
         while ($row = $stmt->fetch()) {
             $createdOn = trim((string)($row['created_on'] ?? ''));
@@ -82,6 +123,7 @@ foreach ($dbFiles as $file) {
                 'email' => $email,
                 'person_key' => $email !== '' ? $email : $name,
                 'db_id' => $dbId,
+                'resource_id' => trim((string)($row['resource_id'] ?? '')),
             ];
         }
     } catch (Throwable $e) {
@@ -168,6 +210,8 @@ foreach ($records as $record) {
         'amount' => $record['amount'],
         'payment_type' => paymentTypeLabel($record['payment_type']),
         'is_linked' => $isLinked,
+        'db_id' => $record['db_id'],
+        'resource_id' => $record['resource_id'],
     ];
     $statuses[$status][$date]['details'][] = $detail;
     $allBucket[$date]['details'][] = $detail;
@@ -199,6 +243,30 @@ foreach ($tabs as &$tab) {
     krsort($tab['data']);
 }
 unset($tab);
+
+$sheetCandidates = [];
+foreach ($dbFiles as $file) {
+    try {
+        $pdoSheet = new PDO('sqlite:' . $file, null, null, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]);
+        $check = $pdoSheet->query("SELECT name FROM sqlite_master WHERE type='table' AND name='spreadsheet_imports'");
+        if ($check === false || !$check->fetch()) { continue; }
+        $sheetStmt = $pdoSheet->query('SELECT id, real_name, email FROM spreadsheet_imports ORDER BY id DESC LIMIT 5000');
+        while ($r = $sheetStmt->fetch()) {
+            $id = trim((string)($r['id'] ?? ''));
+            if ($id === '') { continue; }
+            $sheetCandidates[] = [
+                'id' => $id,
+                'name' => trim((string)($r['real_name'] ?? '')),
+                'email' => mb_strtolower(trim((string)($r['email'] ?? ''))),
+            ];
+        }
+    } catch (Throwable $e) {
+        continue;
+    }
+}
 
 include __DIR__ . '/header.php';
 ?>
@@ -299,6 +367,7 @@ document.addEventListener('DOMContentLoaded', function () {
   const detailPopup = document.getElementById('detailPopup');
   const detailPopupTitle = document.getElementById('detailPopupTitle');
   const detailPopupList = document.getElementById('detailPopupList');
+  const sheetCandidates = <?= json_encode($sheetCandidates, JSON_UNESCAPED_UNICODE); ?>;
 
   function filterByMonth(month) {
     document.querySelectorAll('.js-detail-card').forEach(function (card) {
@@ -362,17 +431,71 @@ document.addEventListener('DOMContentLoaded', function () {
       detail.forEach(function (item) {
         const li = document.createElement('li');
         li.className = 'detail-item';
+        li.dataset.resourceId = item.resource_id || ''; 
         li.innerHTML =
           '<span><strong>氏名:</strong> ' + item.name + '</span>' +
           '<span><strong>メアド:</strong> ' + item.email + '</span>' +
           '<span><strong>金額:</strong> ' + Number(item.amount || 0).toLocaleString() + '</span>' +
-          '<span><strong>入金方法:</strong> ' + item.payment_type + '</span>';
+
+          '<span><strong>入金方法:</strong> ' + item.payment_type + '</span>' +
+          '<span><strong>紐づけID:</strong> ' + (item.db_id || '未設定') + '</span>' +
+          '<div class="link-controls">' +
+          '<input type="text" class="js-link-input" placeholder="IDを入力" value="">' +
+          '<button type="button" class="js-link-save">紐づけ保存</button>' +
+          '<div class="js-link-candidates"></div>' +
+          '</div>'; 
         detailPopupList.appendChild(li);
       });
 
       detailPopup.classList.add('is-open');
       detailPopup.setAttribute('aria-hidden', 'false');
     });
+  });
+
+  function renderCandidates(container, keyword) {
+    const key = (keyword || '').trim().toLowerCase();
+    container.innerHTML = '';
+    if (key.length < 2) { return; }
+    const matched = sheetCandidates.filter(function (row) {
+      return (row.id || '').toLowerCase().includes(key) || (row.name || '').toLowerCase().includes(key) || (row.email || '').toLowerCase().includes(key);
+    }).slice(0, 8);
+    matched.forEach(function (row) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'js-candidate-btn';
+      btn.dataset.sheetId = row.id;
+      btn.textContent = row.id + ' / ' + (row.name || '氏名なし') + ' / ' + (row.email || 'メールなし');
+      container.appendChild(btn);
+    });
+  }
+
+  detailPopupList.addEventListener('input', function (event) {
+    if (!event.target.classList.contains('js-link-input')) return;
+    const wrap = event.target.closest('.link-controls');
+    if (!wrap) return;
+    const c = wrap.querySelector('.js-link-candidates');
+    renderCandidates(c, event.target.value);
+  });
+
+  detailPopupList.addEventListener('click', function (event) {
+    const candidateBtn = event.target.closest('.js-candidate-btn');
+    if (candidateBtn) {
+      const wrap = candidateBtn.closest('.link-controls');
+      const input = wrap ? wrap.querySelector('.js-link-input') : null;
+      if (input) { input.value = candidateBtn.dataset.sheetId || ''; }
+      return;
+    }
+    const saveBtn = event.target.closest('.js-link-save');
+    if (!saveBtn) return;
+    const itemEl = saveBtn.closest('.detail-item');
+    const input = itemEl ? itemEl.querySelector('.js-link-input') : null;
+    const sheetId = input ? input.value.trim() : '';
+    const resourceId = itemEl ? itemEl.dataset.resourceId : '';
+    if (!sheetId || !resourceId) { alert('IDまたは対象データが不足しています'); return; }
+    fetch('calc.php', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:new URLSearchParams({action:'link_transaction', token:resourceId, sheet_id:sheetId})})
+      .then(r => r.json())
+      .then(data => { if (!data.ok) throw new Error(data.message || '保存失敗'); alert('保存しました。画面再読み込みで反映されます。'); })
+      .catch(err => alert(err.message));
   });
 
   document.querySelectorAll('[data-close-detail]').forEach(function (button) {
