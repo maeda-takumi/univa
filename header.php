@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DBファイル一覧 | UniVa</title>
+  <title>入金情報 | UnivaPay</title>
   <link rel="stylesheet" href="style/style.css?v=<?= time(); ?>">
 </head>
 <body>
@@ -15,16 +15,16 @@
     </div>
     <nav class="sidebar-nav">
       <a href="index.php">取引一覧</a>
-      <a href="calc.php">集計</a>
+      <!-- <a href="calc.php">集計</a> -->
     </nav>
-    <section class="theme-switcher" aria-label="表示モード切り替え">
+    <!-- <section class="theme-switcher" aria-label="表示モード切り替え">
       <span>表示モード</span>
       <button id="themeToggle" class="theme-toggle" type="button" aria-label="ダークモード切り替え" aria-pressed="false">
         <span class="theme-toggle-track">
           <img id="themeIcon" src="img/sol.png" alt="ライトモード">
         </span>
       </button>
-    </section>
+    </section> -->
   </aside>
   <header class="site-header">
     <div class="container header-inner">
@@ -33,7 +33,7 @@
       </button>
       <div>
         <p class="eyebrow">Database Manager</p>
-        <h1>DBファイル一覧</h1>
+        <h1>入金情報 | UnivaPay</h1>
       </div>
       <button id="importButton" class="btn btn-primary" type="button">データをインポート</button>
     </div>
