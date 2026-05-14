@@ -16,27 +16,14 @@ $cases = [
         false,
         'token_event_without_transaction_history',
     ],
-    'token-shaped payload without event skips transaction fetch' => [
-        [
-            'data' => [
-                'id' => '11f14f56-d9b7-11ec-89a3-bf2017b5f1e2',
-                'type' => 'recurring',
-                'payment_type' => 'bank_transfer',
-            ],
-        ],
-        false,
-        'payment_token_without_transaction_history',
-    ],
     'token_three_ds_updated webhook skips transaction fetch' => [
         [
+            'id' => '11f14f61-35d3-be6c-9741-016d40fb6880',
             'event' => 'token_three_ds_updated',
             'data' => [
-                'id' => 'token-3ds-updated-123',
-                'store_id' => 'store-123',
-                'payment_type' => 'card',
-                'active' => true,
-                'mode' => 'live',
+                'id' => '11f14f4a-a082-155e-8aa5-fb98d40da2d0',
                 'type' => 'recurring',
+                'payment_type' => 'card',
                 'data' => [
                     'three_ds' => [
                         'enabled' => true,
@@ -47,6 +34,29 @@ $cases = [
         ],
         false,
         'token_event_without_transaction_history',
+    ],
+    'json-string encoded token webhook skips transaction fetch after nested decode' => [
+        univapayWebhookDecodePayload(json_encode(json_encode([
+            'event' => 'token_three_ds_updated',
+            'data' => [
+                'id' => '11f14f4a-a082-155e-8aa5-fb98d40da2d0',
+                'type' => 'recurring',
+                'payment_type' => 'card',
+            ],
+        ], JSON_UNESCAPED_UNICODE), JSON_UNESCAPED_UNICODE)),
+        false,
+        'token_event_without_transaction_history',
+    ],
+    'token-shaped payload without event skips transaction fetch' => [
+        [
+            'data' => [
+                'id' => '11f14f56-d9b7-11ec-89a3-bf2017b5f1e2',
+                'type' => 'recurring',
+                'payment_type' => 'bank_transfer',
+            ],
+        ],
+        false,
+        'payment_token_without_transaction_history',
     ],
     'charge webhook fetches transaction history' => [
         [

@@ -16,11 +16,20 @@ function univapayWebhookDecodePayload(string $rawPayload): array
     }
 
     $payload = json_decode($rawPayload, true);
-    if (json_last_error() !== JSON_ERROR_NONE || !is_array($payload)) {
+    if (json_last_error() !== JSON_ERROR_NONE) {
         return [];
     }
 
-    return $payload;
+    if (is_string($payload)) {
+        $nestedPayload = json_decode($payload, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($nestedPayload)) {
+            return $nestedPayload;
+        }
+
+        return [];
+    }
+
+    return is_array($payload) ? $payload : [];
 }
 
 function univapayWebhookEventName(array $payload): string
@@ -34,14 +43,42 @@ function univapayWebhookEventName(array $payload): string
     return trim((string)($data['event'] ?? ''));
 }
 
-function univapayWebhookSkipFetchReason(array $payload): ?string
+function univapayWebhookData(array $payload): array
+{
+    return is_array($payload['data'] ?? null) ? $payload['data'] : [];
+}
+
+function univapayWebhookEventResource(array $payload): string
 {
     $event = univapayWebhookEventName($payload);
-    if ($event !== '' && strpos($event, 'token_') === 0) {
+    if ($event === '') {
+        return '';
+    }
+
+    $separatorPosition = strpos($event, '_');
+    return $separatorPosition === false ? $event : substr($event, 0, $separatorPosition);
+}
+
+function univapayWebhookTransactionReference(array $payload): string
+{
+    $data = univapayWebhookData($payload);
+    return trim((string)(
+        $payload['transaction_id']
+        ?? $data['transaction_id']
+        ?? $payload['charge_id']
+        ?? $data['charge_id']
+        ?? ''
+    ));
+}
+
+function univapayWebhookSkipFetchReason(array $payload): ?string
+{
+    $resource = univapayWebhookEventResource($payload);
+    if ($resource === 'token') {
         return 'token_event_without_transaction_history';
     }
 
-    $data = is_array($payload['data'] ?? null) ? $payload['data'] : [];
+    $data = univapayWebhookData($payload);
     $tokenId = (string)($payload['token_id'] ?? $data['token_id'] ?? $data['id'] ?? '');
     $type = (string)($payload['type'] ?? $data['type'] ?? '');
     if ($tokenId !== '' && in_array($type, ['one_time', 'recurring'], true)) {
@@ -57,14 +94,14 @@ function univapayWebhookShouldFetchTransactions(array $payload): bool
         return false;
     }
 
-    $event = univapayWebhookEventName($payload);
-    $data = is_array($payload['data'] ?? null) ? $payload['data'] : [];
-    $transactionId = (string)($payload['transaction_id'] ?? $data['transaction_id'] ?? $data['charge_id'] ?? '');
-    if ($transactionId !== '') {
+    if (univapayWebhookTransactionReference($payload) !== '') {
         return true;
     }
 
-    return $event === '' || strpos($event, 'charge_') === 0 || strpos($event, 'transaction_') === 0;
+    $event = univapayWebhookEventName($payload);
+    $resource = univapayWebhookEventResource($payload);
+
+    return $event === '' || in_array($resource, ['charge', 'transaction'], true);
 }
 function univapayWebhookAuthorized(array $univapayConfig): bool
 {
