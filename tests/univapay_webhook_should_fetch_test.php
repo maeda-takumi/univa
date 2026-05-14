@@ -27,6 +27,27 @@ $cases = [
         false,
         'payment_token_without_transaction_history',
     ],
+    'token_three_ds_updated webhook skips transaction fetch' => [
+        [
+            'event' => 'token_three_ds_updated',
+            'data' => [
+                'id' => 'token-3ds-updated-123',
+                'store_id' => 'store-123',
+                'payment_type' => 'card',
+                'active' => true,
+                'mode' => 'live',
+                'type' => 'recurring',
+                'data' => [
+                    'three_ds' => [
+                        'enabled' => true,
+                        'status' => 'successful',
+                    ],
+                ],
+            ],
+        ],
+        false,
+        'token_event_without_transaction_history',
+    ],
     'charge webhook fetches transaction history' => [
         [
             'event' => 'charge_finished',
