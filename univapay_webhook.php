@@ -34,13 +34,13 @@ function univapayWebhookDecodePayload(string $rawPayload): array
 
 function univapayWebhookEventName(array $payload): string
 {
-    $event = trim((string)($payload['event'] ?? ''));
+    $event = trim((string)($payload['event'] ?? $payload['trigger'] ?? $payload['type'] ?? ''));
     if ($event !== '') {
         return $event;
     }
 
     $data = is_array($payload['data'] ?? null) ? $payload['data'] : [];
-    return trim((string)($data['event'] ?? ''));
+    return trim((string)($data['event'] ?? $data['trigger'] ?? ''));
 }
 
 function univapayWebhookData(array $payload): array
@@ -98,10 +98,10 @@ function univapayWebhookShouldFetchTransactions(array $payload): bool
         return true;
     }
 
-    $event = univapayWebhookEventName($payload);
-    $resource = univapayWebhookEventResource($payload);
-
-    return $event === '' || in_array($resource, ['charge', 'transaction'], true);
+    // UnivaPay の webhook は charge/refund/subscription など複数のトリガーがあり、
+    // 取引履歴 API は課金・返金を横断して取得できるため、token 系以外は受信を
+    // トリガーとして必ず再取得します。
+    return true;
 }
 function univapayWebhookAuthorized(array $univapayConfig): bool
 {
