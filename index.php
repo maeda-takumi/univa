@@ -95,6 +95,29 @@ $records = array_values(array_filter($records, static function (array $record) u
 
     return true;
 }));
+if (isset($_GET['export']) && $_GET['export'] === 'csv') {
+    $filename = 'transaction_history_' . date('Ymd_His') . '.csv';
+    header('Content-Type: text/csv; charset=UTF-8');
+    header('Content-Disposition: attachment; filename="' . $filename . '"');
+
+    $output = fopen('php://output', 'w');
+    if ($output !== false) {
+        fwrite($output, "\xEF\xBB\xBF");
+        fputcsv($output, ['日付', '状態', '入金方法', '入金額', '氏名', 'メールアドレス']);
+        foreach ($records as $record) {
+            fputcsv($output, [
+                formatDate((string)$record['created_on']),
+                labelStatus((string)$record['status']),
+                labelPaymentType((string)$record['payment_type']),
+                formatAmount($record['amount']),
+                (string)$record['metadata_name'],
+                (string)$record['cardholder_email'],
+            ]);
+        }
+        fclose($output);
+    }
+    exit;
+}
 include __DIR__ . '/header.php';
 
 function formatDate(string $value): string
@@ -147,7 +170,13 @@ function labelPaymentType(string $paymentType): string
 <section class="panel">
   <div class="panel-head">
     <h2>取引一覧</h2>
-    <span class="count"><?= count($records); ?> 件</span>
+    <div class="panel-actions">
+      <span class="count"><?= count($records); ?> 件</span>
+      <a
+        class="action-btn action-btn-secondary"
+        href="?<?= htmlspecialchars(http_build_query(array_merge($filters, ['export' => 'csv'])), ENT_QUOTES, 'UTF-8'); ?>"
+      >CSVエクスポート</a>
+    </div>
   </div>
 
   <form method="get" class="filter-form">
@@ -208,7 +237,11 @@ function labelPaymentType(string $paymentType): string
         <?php foreach ($records as $record): ?>
           <li class="transaction-item">
             <span><?= htmlspecialchars(formatDate((string)$record['created_on']), ENT_QUOTES, 'UTF-8'); ?></span>
-            <span><?= htmlspecialchars(labelStatus((string)$record['status']), ENT_QUOTES, 'UTF-8'); ?></span>
+            <span>
+              <span class="status-badge status-badge-<?= htmlspecialchars((string)$record['status'], ENT_QUOTES, 'UTF-8'); ?>">
+                <?= htmlspecialchars(labelStatus((string)$record['status']), ENT_QUOTES, 'UTF-8'); ?>
+              </span>
+            </span>
             <span><?= htmlspecialchars(labelPaymentType((string)$record['payment_type']), ENT_QUOTES, 'UTF-8'); ?></span>
             <span><?= htmlspecialchars(formatAmount($record['amount']), ENT_QUOTES, 'UTF-8'); ?></span>
             <span><?= htmlspecialchars((string)$record['metadata_name'], ENT_QUOTES, 'UTF-8'); ?></span>

@@ -161,10 +161,9 @@ function univapayHandleWebhookRequest(?string $rawPayload = null, ?DateTimeImmut
         }
 
         [$secret, $jwt] = univapayResolveCredentials($config);
-        $fetchDays = (int)($univapayConfig['webhook_fetch_days'] ?? 1);
-        [$startDate, $endDate] = univapayWebhookFetchRange($receivedAt, $fetchDays);
+        [$startDate, $endDate] = univapayWebhookFetchRange($receivedAt);
 
-        // Webhook payloadは業務データとして使わず、受信日時をトリガーにして既存の取引履歴APIから取得します。
+        // Webhook payloadは業務データとして使わず、受信日時の当月初日〜受信日を既存の取引履歴APIから取得します。
         $result = univapayFetchAndStore($startDate, $endDate, [
             'secret' => $secret,
             'jwt' => $jwt,

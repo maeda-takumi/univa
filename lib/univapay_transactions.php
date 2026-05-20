@@ -294,11 +294,10 @@ function univapayFetchAndStore(string $startDate, string $endDate, array $option
     ];
 }
 
-function univapayWebhookFetchRange(DateTimeImmutable $receivedAt, int $fetchDays): array
+function univapayWebhookFetchRange(DateTimeImmutable $receivedAt): array
 {
-    $fetchDays = max(1, $fetchDays);
     $end = $receivedAt->setTimezone(new DateTimeZone('UTC'));
-    $start = $end->sub(new DateInterval('P' . ($fetchDays - 1) . 'D'));
+    $start = $end->modify('first day of this month');
 
     return [
         $start->format('Y-m-d'),

@@ -186,7 +186,20 @@ body.dark-mode .theme-toggle-track img {
   border-color: #cfd4dc;
 }
 .panel-head { display: flex; justify-content: space-between; align-items: center; }
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+}
 .count { color: var(--muted); font-weight: 600; }
+.action-btn-secondary {
+  background: var(--surface-soft);
+  border-color: var(--border);
+  color: var(--text);
+}
+.action-btn-secondary:hover {
+  border-color: #cfd4dc;
+}
 .db-grid {
   list-style: none;
   padding: 0;
@@ -270,6 +283,30 @@ body.dark-mode .theme-toggle-track img {
 }
 .transaction-list .transaction-item:last-child {
   border-bottom: none;
+}
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: .2rem .6rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-weight: 700;
+  font-size: .82rem;
+}
+.status-badge-successful {
+  background: #eafbf1;
+  color: #166534;
+  border-color: #86efac;
+}
+.status-badge-failed {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+.status-badge-awaiting {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #93c5fd;
 }
 @media (max-width: 860px) {
   .transaction-item {
