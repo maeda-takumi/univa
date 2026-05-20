@@ -172,10 +172,6 @@ function labelPaymentType(string $paymentType): string
     <h2>取引一覧</h2>
     <div class="panel-actions">
       <span class="count"><?= count($records); ?> 件</span>
-      <a
-        class="action-btn action-btn-secondary"
-        href="?<?= htmlspecialchars(http_build_query(array_merge($filters, ['export' => 'csv'])), ENT_QUOTES, 'UTF-8'); ?>"
-      >CSVエクスポート</a>
     </div>
   </div>
 

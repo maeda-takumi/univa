@@ -1,8 +1,8 @@
 <?php
 return [
     'google_sheet' => [
-        'spreadsheet_id' => '1BHca4zzFQfwbJ4bzyuvPpIn8gXN7aF51Gb_tz3RmEZ4',
-        'sheet_name' => 'ALL投資顧客管理',
+        'spreadsheet_id' => '1HGz1Jq-S3UWKqtbDtPnRmaDiK5LRUWYifBtBquyVFhU',
+        'sheet_name' => '投資顧客管理',
     ],
     'univapay' => [
         'secret' => getenv('UNIVAPAY_SECRET') ?: '9X9sL29YItHjZgYvK553',
