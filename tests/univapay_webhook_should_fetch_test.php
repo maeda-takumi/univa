@@ -78,6 +78,27 @@ $cases = [
         true,
         null,
     ],
+    'charge webhook with charge id in data id fetches transaction history' => [
+        [
+            'id' => 'webhook-event-123',
+            'event' => 'charge_finished',
+            'data' => [
+                'id' => 'charge-123',
+            ],
+        ],
+        true,
+        null,
+    ],
+    'chargeback webhook with resource id fetches transaction history' => [
+        [
+            'event' => 'chargeback_created',
+            'data' => [
+                'resource_id' => 'txn-chargeback-123',
+            ],
+        ],
+        true,
+        null,
+    ],
 ];
 
 foreach ($cases as $label => [$payload, $expectedShouldFetch, $expectedSkipReason]) {
@@ -102,6 +123,48 @@ foreach ($cases as $label => [$payload, $expectedShouldFetch, $expectedSkipReaso
         ));
         exit(1);
     }
+}
+
+$chargebackPayload = [
+    'event' => 'chargeback_created',
+    'data' => [
+        'charge_id' => 'charge-123',
+    ],
+];
+if (univapayDetectWebhookStatus($chargebackPayload) !== 'chargeback') {
+    fwrite(STDERR, "chargeback webhook should be detected as chargeback\n");
+    exit(1);
+}
+
+if (univapayResultKindFromItem(['type' => 'refund', 'payment_type' => 'card']) !== 'refund') {
+    fwrite(STDERR, "refund transaction should be classified as refund result kind\n");
+    exit(1);
+}
+
+if (univapayResultKindFromItem(['type' => 'charge', 'payment_type' => 'bank_transfer']) !== 'transfer') {
+    fwrite(STDERR, "bank transfer charge should be classified as transfer result kind\n");
+    exit(1);
+}
+
+[$resourceId, $chargeId] = univapayWebhookReferenceIds([
+    'id' => 'webhook-event-123',
+    'event' => 'charge_finished',
+    'data' => [
+        'id' => 'charge-123',
+    ],
+]);
+if ($resourceId !== '' || $chargeId !== 'charge-123') {
+    fwrite(STDERR, "webhook reference ids should treat charge data.id as charge id\n");
+    exit(1);
+}
+
+$eventDate = univapayWebhookEventDate(
+    ['data' => ['created_on' => '2026-04-15T12:34:56Z']],
+    new DateTimeImmutable('2026-05-20T00:00:00Z')
+);
+if ($eventDate->format('Y-m-d') !== '2026-04-15') {
+    fwrite(STDERR, "webhook event date should prefer payload created_on\n");
+    exit(1);
 }
 
 echo "All webhook should-fetch tests passed.\n";

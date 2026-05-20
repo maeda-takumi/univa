@@ -122,6 +122,22 @@ body {
   border-color: var(--brand);
   color: #fff;
 }
+.sidebar-sync {
+  display: grid;
+  gap: .55rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+.sidebar-sync button {
+  width: 100%;
+}
+.sidebar-sync p {
+  margin: 0;
+  color: var(--muted);
+  font-size: .82rem;
+  line-height: 1.45;
+}
 .eyebrow {
   margin: 0;
   color: var(--brand);
@@ -139,6 +155,30 @@ h1 {
 }
 .app-shell {
   padding-bottom: 2.4rem;
+}
+.sync-notice,
+.sync-meta {
+  margin: 0 0 1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: .75rem .9rem;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 700;
+}
+.sync-notice-success {
+  background: var(--ok-soft);
+  border-color: #86efac;
+  color: var(--ok);
+}
+.sync-notice-error {
+  background: var(--bad-soft);
+  border-color: #fca5a5;
+  color: var(--bad);
+}
+.sync-meta {
+  color: var(--muted);
+  font-weight: 600;
 }
 .dashboard-panel {
   background: var(--surface);

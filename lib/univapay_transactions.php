@@ -157,6 +157,7 @@ function univapayEnsureTransactionHistoryTable(PDO $pdo): void
             charge_id TEXT,
             type TEXT,
             status TEXT,
+            result_kind TEXT,
             amount INTEGER,
             currency TEXT,
             payment_type TEXT,
@@ -179,6 +180,158 @@ function univapayEnsureTransactionHistoryTable(PDO $pdo): void
             updated_at TEXT
         )'
     );
+
+    $columns = [];
+    $tableInfo = $pdo->query('PRAGMA table_info(transaction_history)');
+    if ($tableInfo !== false) {
+        while ($column = $tableInfo->fetch(PDO::FETCH_ASSOC)) {
+            $name = (string)($column['name'] ?? '');
+            if ($name !== '') {
+                $columns[$name] = true;
+            }
+        }
+    }
+    if (!isset($columns['result_kind'])) {
+        $pdo->exec('ALTER TABLE transaction_history ADD COLUMN result_kind TEXT');
+    }
+}
+
+function univapayEnsureWebhookEventsTable(PDO $pdo): void
+{
+    $pdo->exec(
+        'CREATE TABLE IF NOT EXISTS univapay_webhook_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_name TEXT,
+            resource_id TEXT,
+            charge_id TEXT,
+            detected_status TEXT,
+            payload_sha256 TEXT UNIQUE,
+            raw_json TEXT,
+            received_at TEXT,
+            created_at TEXT
+        )'
+    );
+}
+
+function univapayStatusPriority(?string $status): int
+{
+    return match ((string)$status) {
+        'chargeback' => 100,
+        default => 0,
+    };
+}
+
+function univapayResultKindPriority(?string $resultKind): int
+{
+    return match ((string)$resultKind) {
+        'chargeback' => 100,
+        'refund' => 90,
+        default => 0,
+    };
+}
+
+function univapayWebhookStatusOverrideForTransaction(PDO $pdo, string $resourceId, ?string $chargeId): ?string
+{
+    try {
+        univapayEnsureWebhookEventsTable($pdo);
+
+        $conditions = ['resource_id = :resource_id'];
+        $params = [':resource_id' => $resourceId];
+        if ($chargeId !== null && $chargeId !== '') {
+            $conditions[] = 'charge_id = :charge_id';
+            $conditions[] = 'resource_id = :charge_id';
+            $params[':charge_id'] = $chargeId;
+        }
+
+        $stmt = $pdo->prepare(
+            'SELECT detected_status
+             FROM univapay_webhook_events
+             WHERE detected_status IS NOT NULL
+               AND (' . implode(' OR ', $conditions) . ')
+             ORDER BY id DESC
+             LIMIT 1'
+        );
+        $stmt->execute($params);
+        $status = $stmt->fetchColumn();
+
+        return is_string($status) && $status !== '' ? $status : null;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+function univapayEffectiveStatus(PDO $pdo, string $resourceId, ?string $incomingStatus, ?string $chargeId = null): ?string
+{
+    if ($incomingStatus !== null) {
+        return $incomingStatus;
+    }
+
+    $stmt = $pdo->prepare('SELECT status FROM transaction_history WHERE resource_id = :resource_id');
+    $stmt->execute([':resource_id' => $resourceId]);
+    $existing = $stmt->fetchColumn();
+
+    return is_string($existing) && $existing !== '' ? $existing : null;
+}
+
+function univapayNormalizeResultKind(?string $resultKind): ?string
+{
+    $resultKind = trim((string)$resultKind);
+    if ($resultKind === '') {
+        return null;
+    }
+
+    return match ($resultKind) {
+        'chargeback', 'refund', 'transfer', 'payment' => $resultKind,
+        'チャージバック' => 'chargeback',
+        '返金' => 'refund',
+        '振込' => 'transfer',
+        '入金' => 'payment',
+        default => $resultKind,
+    };
+}
+
+function univapayWebhookResultOverrideForTransaction(PDO $pdo, string $resourceId, ?string $chargeId): ?string
+{
+    $status = univapayWebhookStatusOverrideForTransaction($pdo, $resourceId, $chargeId);
+    return $status === 'chargeback' ? 'chargeback' : univapayNormalizeResultKind($status);
+}
+
+function univapayResultKindFromItem(array $item): string
+{
+    $type = trim((string)($item['type'] ?? ''));
+    $paymentType = trim((string)($item['payment_type'] ?? ''));
+    $rawJson = strtolower(json_encode($item, JSON_UNESCAPED_UNICODE) ?: '');
+
+    if (str_contains($rawJson, 'chargeback') || str_contains($rawJson, 'dispute') || str_contains($rawJson, 'チャージバック')) {
+        return 'chargeback';
+    }
+    if ($type === 'refund') {
+        return 'refund';
+    }
+    if ($paymentType === 'bank_transfer') {
+        return 'transfer';
+    }
+
+    return 'payment';
+}
+
+function univapayEffectiveResultKind(PDO $pdo, string $resourceId, ?string $incomingResultKind, ?string $chargeId = null): ?string
+{
+    $incomingResultKind = univapayNormalizeResultKind($incomingResultKind);
+    $stmt = $pdo->prepare('SELECT result_kind FROM transaction_history WHERE resource_id = :resource_id');
+    $stmt->execute([':resource_id' => $resourceId]);
+    $existing = univapayNormalizeResultKind($stmt->fetchColumn() ?: null);
+
+    if ($existing !== null && univapayResultKindPriority($existing) > univapayResultKindPriority($incomingResultKind)) {
+        return $existing;
+    }
+
+    $webhookResultKind = univapayWebhookResultOverrideForTransaction($pdo, $resourceId, $chargeId);
+    if ($webhookResultKind !== null && univapayResultKindPriority($webhookResultKind) > univapayResultKindPriority($incomingResultKind)) {
+        return $webhookResultKind;
+    }
+
+    return $incomingResultKind;
 }
 
 function univapaySaveTransactionHistory(PDO $pdo, array $items): int
@@ -187,13 +340,13 @@ function univapaySaveTransactionHistory(PDO $pdo, array $items): int
 
     $stmt = $pdo->prepare(
         'INSERT INTO transaction_history (
-            resource_id, created_on, charge_id, type, status, amount, currency,
+            resource_id, created_on, charge_id, type, status, result_kind, amount, currency,
             payment_type, charge_type, bank_transfer_payment_status, bank_transfer_latest_deposit_date,
             cardholder_name, cardholder_email, brand, gateway, service_provider,
             metadata_name, metadata_phone_number, metadata_link_id,
             store_id, store_name, merchant_name, db_id, raw_json, updated_at
         ) VALUES (
-            :resource_id, :created_on, :charge_id, :type, :status, :amount, :currency,
+            :resource_id, :created_on, :charge_id, :type, :status, :result_kind, :amount, :currency,
             :payment_type, :charge_type, :bank_transfer_payment_status, :bank_transfer_latest_deposit_date,
             :cardholder_name, :cardholder_email, :brand, :gateway, :service_provider,
             :metadata_name, :metadata_phone_number, :metadata_link_id,
@@ -203,6 +356,7 @@ function univapaySaveTransactionHistory(PDO $pdo, array $items): int
             charge_id = excluded.charge_id,
             type = excluded.type,
             status = excluded.status,
+            result_kind = excluded.result_kind,
             amount = excluded.amount,
             currency = excluded.currency,
             payment_type = excluded.payment_type,
@@ -244,7 +398,18 @@ function univapaySaveTransactionHistory(PDO $pdo, array $items): int
             ':created_on' => $item['created_on'] ?? null,
             ':charge_id' => $item['charge_id'] ?? null,
             ':type' => $item['type'] ?? null,
-            ':status' => $item['status'] ?? null,
+            ':status' => univapayEffectiveStatus(
+                $pdo,
+                (string)$resourceId,
+                isset($item['status']) ? (string)$item['status'] : null,
+                isset($item['charge_id']) ? (string)$item['charge_id'] : null
+            ),
+            ':result_kind' => univapayEffectiveResultKind(
+                $pdo,
+                (string)$resourceId,
+                univapayResultKindFromItem($item),
+                isset($item['charge_id']) ? (string)$item['charge_id'] : null
+            ),
             ':amount' => $item['amount'] ?? null,
             ':currency' => $item['currency'] ?? null,
             ':payment_type' => $item['payment_type'] ?? null,
@@ -271,6 +436,124 @@ function univapaySaveTransactionHistory(PDO $pdo, array $items): int
     }
 
     return $savedCount;
+}
+
+function univapayDetectWebhookStatus(array $payload): ?string
+{
+    $haystack = strtolower(json_encode($payload, JSON_UNESCAPED_UNICODE) ?: '');
+    foreach (['chargeback', 'dispute', 'チャージバック'] as $needle) {
+        if (str_contains($haystack, strtolower($needle))) {
+            return 'chargeback';
+        }
+    }
+
+    return null;
+}
+
+function univapayWebhookReferenceIds(array $payload): array
+{
+    $data = is_array($payload['data'] ?? null) ? $payload['data'] : [];
+    $eventName = trim((string)($payload['event'] ?? $payload['trigger'] ?? $payload['type'] ?? ''));
+    $eventResource = $eventName !== '' && strpos($eventName, '_') !== false
+        ? substr($eventName, 0, strpos($eventName, '_'))
+        : $eventName;
+    $resourceId = trim((string)(
+        $payload['resource_id']
+        ?? $payload['transaction_id']
+        ?? $data['resource_id']
+        ?? $data['transaction_id']
+        ?? ''
+    ));
+    $chargeId = trim((string)(
+        $payload['charge_id']
+        ?? $data['charge_id']
+        ?? ($eventResource === 'charge' ? ($data['id'] ?? '') : '')
+        ?? ''
+    ));
+
+    return [$resourceId, $chargeId];
+}
+
+function univapaySaveWebhookEvent(PDO $pdo, array $payload, string $rawPayload, DateTimeImmutable $receivedAt, string $eventName): ?string
+{
+    univapayEnsureTransactionHistoryTable($pdo);
+    univapayEnsureWebhookEventsTable($pdo);
+
+    $detectedStatus = univapayDetectWebhookStatus($payload);
+    [$resourceId, $chargeId] = univapayWebhookReferenceIds($payload);
+    $payloadHash = hash('sha256', $rawPayload);
+    $now = gmdate('c');
+
+    $stmt = $pdo->prepare(
+        'INSERT OR IGNORE INTO univapay_webhook_events (
+            event_name, resource_id, charge_id, detected_status, payload_sha256, raw_json, received_at, created_at
+        ) VALUES (
+            :event_name, :resource_id, :charge_id, :detected_status, :payload_sha256, :raw_json, :received_at, :created_at
+        )'
+    );
+    $stmt->execute([
+        ':event_name' => $eventName !== '' ? $eventName : null,
+        ':resource_id' => $resourceId !== '' ? $resourceId : null,
+        ':charge_id' => $chargeId !== '' ? $chargeId : null,
+        ':detected_status' => $detectedStatus,
+        ':payload_sha256' => $payloadHash,
+        ':raw_json' => $rawPayload,
+        ':received_at' => $receivedAt->format(DateTimeInterface::ATOM),
+        ':created_at' => $now,
+    ]);
+
+    if ($detectedStatus === 'chargeback') {
+        univapayApplyTransactionResultOverride($pdo, $detectedStatus, $resourceId, $chargeId, $now);
+    }
+
+    return $detectedStatus;
+}
+
+function univapayApplyTransactionResultOverride(PDO $pdo, string $resultKind, string $resourceId, string $chargeId, string $updatedAt): int
+{
+    $resultKind = univapayNormalizeResultKind($resultKind) ?? $resultKind;
+    if ($resourceId === '' && $chargeId === '') {
+        return 0;
+    }
+
+    if ($resourceId !== '') {
+        $stmt = $pdo->prepare('UPDATE transaction_history SET result_kind = :result_kind, updated_at = :updated_at WHERE resource_id = :resource_id');
+        $stmt->execute([':result_kind' => $resultKind, ':updated_at' => $updatedAt, ':resource_id' => $resourceId]);
+        if ($stmt->rowCount() > 0) {
+            return $stmt->rowCount();
+        }
+    }
+
+    if ($chargeId !== '') {
+        $stmt = $pdo->prepare('UPDATE transaction_history SET result_kind = :result_kind, updated_at = :updated_at WHERE charge_id = :charge_id OR resource_id = :charge_id');
+        $stmt->execute([':result_kind' => $resultKind, ':updated_at' => $updatedAt, ':charge_id' => $chargeId]);
+        return $stmt->rowCount();
+    }
+
+    return 0;
+}
+
+function univapayApplyTransactionStatusOverride(PDO $pdo, string $status, string $resourceId, string $chargeId, string $updatedAt): int
+{
+    if ($resourceId === '' && $chargeId === '') {
+        return 0;
+    }
+
+    if ($resourceId !== '') {
+        $stmt = $pdo->prepare('UPDATE transaction_history SET status = :status, updated_at = :updated_at WHERE resource_id = :resource_id');
+        $stmt->execute([':status' => $status, ':updated_at' => $updatedAt, ':resource_id' => $resourceId]);
+        if ($stmt->rowCount() > 0) {
+            return $stmt->rowCount();
+        }
+    }
+
+    if ($chargeId !== '') {
+        $stmt = $pdo->prepare('UPDATE transaction_history SET status = :status, updated_at = :updated_at WHERE charge_id = :charge_id OR resource_id = :charge_id');
+        $stmt->execute([':status' => $status, ':updated_at' => $updatedAt, ':charge_id' => $chargeId]);
+        return $stmt->rowCount();
+    }
+
+    return 0;
 }
 
 function univapayFetchAndStore(string $startDate, string $endDate, array $options): array

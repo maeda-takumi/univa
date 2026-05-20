@@ -62,13 +62,41 @@ function univapayWebhookEventResource(array $payload): string
 function univapayWebhookTransactionReference(array $payload): string
 {
     $data = univapayWebhookData($payload);
+    $resource = univapayWebhookEventResource($payload);
     return trim((string)(
         $payload['transaction_id']
         ?? $data['transaction_id']
+        ?? $payload['resource_id']
+        ?? $data['resource_id']
         ?? $payload['charge_id']
         ?? $data['charge_id']
+        ?? ($resource === 'charge' ? ($data['id'] ?? '') : '')
         ?? ''
     ));
+}
+
+function univapayWebhookEventDate(array $payload, DateTimeImmutable $fallback): DateTimeImmutable
+{
+    $data = univapayWebhookData($payload);
+    $value = trim((string)(
+        $payload['created_on']
+        ?? $payload['updated_on']
+        ?? $payload['created_at']
+        ?? $data['created_on']
+        ?? $data['updated_on']
+        ?? $data['created_at']
+        ?? ''
+    ));
+
+    if ($value === '') {
+        return $fallback;
+    }
+
+    try {
+        return new DateTimeImmutable($value, new DateTimeZone('UTC'));
+    } catch (Throwable $e) {
+        return $fallback;
+    }
 }
 
 function univapayWebhookSkipFetchReason(array $payload): ?string
@@ -134,6 +162,8 @@ function univapayHandleWebhookRequest(?string $rawPayload = null, ?DateTimeImmut
         $receivedAt = $receivedAt ?? new DateTimeImmutable('now', new DateTimeZone('UTC'));
         $rawPayload = $rawPayload ?? (string)file_get_contents('php://input');
         $payload = univapayWebhookDecodePayload($rawPayload);
+        $eventName = univapayWebhookEventName($payload);
+        $detectedStatus = null;
         $config = univapayLoadConfig(__DIR__ . '/config.php');
         $univapayConfig = is_array($config['univapay'] ?? null) ? $config['univapay'] : [];
 
@@ -145,13 +175,17 @@ function univapayHandleWebhookRequest(?string $rawPayload = null, ?DateTimeImmut
             return;
         }
 
+        $pdo = univapayCreatePdo(__DIR__ . '/univapay_transaction_history.sqlite');
+        $detectedStatus = univapaySaveWebhookEvent($pdo, $payload, $rawPayload, $receivedAt, $eventName);
+
         $skipReason = univapayWebhookSkipFetchReason($payload);
         if (!univapayWebhookShouldFetchTransactions($payload)) {
             univapayWebhookJsonResponse(200, [
                 'ok' => true,
                 'message' => '取引履歴の再取得が不要なWebhookイベントのため受信のみ完了しました。',
                 'received_at' => $receivedAt->format(DateTimeInterface::ATOM),
-                'event' => univapayWebhookEventName($payload) ?: null,
+                'event' => $eventName ?: null,
+                'detected_status' => $detectedStatus,
                 'payload_sha256' => hash('sha256', $rawPayload),
                 'payload_used_as_business_data' => false,
                 'skipped_fetch' => true,
@@ -161,7 +195,7 @@ function univapayHandleWebhookRequest(?string $rawPayload = null, ?DateTimeImmut
         }
 
         [$secret, $jwt] = univapayResolveCredentials($config);
-        [$startDate, $endDate] = univapayWebhookFetchRange($receivedAt);
+        [$startDate, $endDate] = univapayWebhookFetchRange(univapayWebhookEventDate($payload, $receivedAt));
 
         // Webhook payloadは業務データとして使わず、受信日時の当月初日〜受信日を既存の取引履歴APIから取得します。
         $result = univapayFetchAndStore($startDate, $endDate, [
@@ -176,7 +210,8 @@ function univapayHandleWebhookRequest(?string $rawPayload = null, ?DateTimeImmut
             'ok' => true,
             'message' => 'WebhookをトリガーにUnivaPay API取得とDB保存が完了しました。',
             'received_at' => $receivedAt->format(DateTimeInterface::ATOM),
-            'event' => univapayWebhookEventName($payload) ?: null,
+            'event' => $eventName ?: null,
+            'detected_status' => $detectedStatus,
             'payload_sha256' => hash('sha256', $rawPayload),
             'payload_used_as_business_data' => false,
             'skipped_fetch' => false,

@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once dirname(__DIR__) . '/lib/univapay_transactions.php';
+
 function u(string $escaped): string
 {
     return json_decode('"' . $escaped . '"', false, 512, JSON_THROW_ON_ERROR);
@@ -108,6 +110,11 @@ function expected_dest(string $method): string
 
 function db_entries(): array
 {
+    $sqliteEntries = db_entries_from_sqlite();
+    if ($sqliteEntries !== []) {
+        return $sqliteEntries;
+    }
+
     $entries = [];
     $customerPath = __DIR__ . DIRECTORY_SEPARATOR . 'data' . DIRECTORY_SEPARATOR . 'customer_payments.csv';
     $sourcePath = is_readable($customerPath) ? $customerPath : csv_path('ALL*.csv');
@@ -138,6 +145,64 @@ function db_entries(): array
     return $entries;
 }
 
+function db_entries_from_sqlite(): array
+{
+    $dbPath = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'univapay_transaction_history.sqlite';
+    if (!is_readable($dbPath)) {
+        return [];
+    }
+
+    $entries = [];
+    try {
+        $pdo = new PDO('sqlite:' . $dbPath, null, null, [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        ]);
+        $check = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name='spreadsheet_imports'");
+        if ($check === false || !$check->fetch()) {
+            return [];
+        }
+
+        $stmt = $pdo->query(
+            "SELECT id, real_name, email, payment_date, payment_amount, payment_destination, state, system_name, expected_payment_amount, payment_count, sales_person_in_charge
+             FROM spreadsheet_imports
+             WHERE COALESCE(payment_date, '') <> ''
+               AND COALESCE(payment_amount, '') <> ''
+               AND payment_destination LIKE '%Univa%'
+             ORDER BY payment_date DESC, id DESC"
+        );
+        while ($row = $stmt->fetch()) {
+            $date = normalize_date($row['payment_date'] ?? '');
+            $amount = normalize_amount($row['payment_amount'] ?? '');
+            $dest = trim((string)($row['payment_destination'] ?? ''));
+            if ($date === '' || $amount === 0 || !str_contains($dest, 'Univa')) continue;
+
+            $id = trim((string)($row['id'] ?? ''));
+            $name = trim((string)($row['real_name'] ?? ''));
+            $entries[] = [
+                'key' => 'db-' . ($id !== '' ? $id : count($entries) + 1),
+                'line' => $id !== '' ? $id : count($entries) + 1,
+                'id' => $id,
+                'date' => $date,
+                'name' => $name,
+                'nameKey' => normalize_name($name),
+                'email' => normalize_email($row['email'] ?? ''),
+                'amount' => $amount,
+                'dest' => $dest,
+                'status' => trim((string)($row['state'] ?? '')),
+                'system' => trim((string)($row['system_name'] ?? '')),
+                'planned' => trim((string)($row['expected_payment_amount'] ?? '')),
+                'nth' => trim((string)($row['payment_count'] ?? '')),
+                'sales' => trim((string)($row['sales_person_in_charge'] ?? '')),
+            ];
+        }
+    } catch (Throwable $e) {
+        return [];
+    }
+
+    return $entries;
+}
+
 function tx_entries(): array
 {
     $entries = [];
@@ -162,12 +227,19 @@ function tx_entries(): array
                 }
             }
             if ($table === null) continue;
+            if ($table === 'transaction_history') {
+                univapayEnsureTransactionHistoryTable($pdo);
+            }
+            $typeSelect = $table === 'transaction_history' ? 'type' : 'NULL AS type';
+            $resultKindSelect = $table === 'transaction_history' ? 'result_kind' : 'NULL AS result_kind';
 
             $stmt = $pdo->query(
-                'SELECT created_on, status, payment_type, amount, metadata_name, cardholder_name, cardholder_email FROM ' . $table . ' ORDER BY created_on DESC'
+                'SELECT created_on, ' . $typeSelect . ', status, ' . $resultKindSelect . ', payment_type, amount, metadata_name, cardholder_name, cardholder_email FROM ' . $table . ' ORDER BY created_on DESC'
             );
             while ($row = $stmt->fetch()) {
                 if (trim((string)($row['status'] ?? '')) !== 'successful') continue;
+                $resultKind = tx_result_kind($row['result_kind'] ?? '', $row['type'] ?? '', $row['payment_type'] ?? '');
+                if (!in_array($resultKind, ['payment', 'transfer'], true)) continue;
 
                 $datetime = format_tx_datetime((string)($row['created_on'] ?? ''));
                 $date = normalize_date($datetime, true);
@@ -248,6 +320,27 @@ function payment_method_label(string $paymentType): string
         'bank_transfer' => u('\u632f\u8fbc'),
         default => $paymentType,
     };
+}
+
+function tx_result_kind(?string $resultKind, ?string $type, ?string $paymentType): string
+{
+    $resultKind = trim((string)$resultKind);
+    if ($resultKind !== '') {
+        return match ($resultKind) {
+            'チャージバック' => 'chargeback',
+            '返金' => 'refund',
+            '振込' => 'transfer',
+            '入金' => 'payment',
+            default => $resultKind,
+        };
+    }
+    if ((string)$type === 'refund') {
+        return 'refund';
+    }
+    if ((string)$paymentType === 'bank_transfer') {
+        return 'transfer';
+    }
+    return 'payment';
 }
 
 function build_daily_data(): array
